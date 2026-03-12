@@ -6,22 +6,21 @@ const UserSchema = new mongoose.Schema(
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
-    resetOTP: {
-      type: Number,
-      required: false,
-    },
-    otpExpiry: {
-      type: Date,
-      required: false,
-    },
-    phoneNumber: {
-      type: String,
-      required: true,
-    },
-    createdAt: {
-      type: Date,
-      default: Date.now,
-    },
+    // profileImage: {
+    //   type: String,
+    //   default:
+    //     "https://res.cloudinary.com/your-cloud/image/upload/v1/default-avatar.png",
+    // },
+    // profileImageDetails: {
+    //   url: String,
+    //   publicId: String,
+    // },
+    resetOTP: { type: Number },
+    otpExpiry: { type: Date },
+    phoneNumber: { type: String, required: true },
+    zipPostelCode: { type: String },
+    city: { type: String },
+    country: { type: String },
     role: {
       type: String,
       enum: ["customer", "driver"],
