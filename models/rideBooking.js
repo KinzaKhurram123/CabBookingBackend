@@ -12,9 +12,22 @@ const rideBookingSchema = new mongoose.Schema(
       enum: ["cab", "bike", "parcel", "pet"],
       required: true,
     },
+    selectedVehicle: {
+      type: String,
+      enum: ["cab", "bike", "economy", "sedan", "suv", "luxury"],
+      required: true,
+    },
     pickupLocation: {
-      lat: { type: Number, required: true },
-      lng: { type: Number, required: true },
+      type: {
+        type: String,
+        enum: ["Point"],
+        required: true,
+      },
+      coordinates: {
+        type: [Number],
+        required: true,
+        index: "2dsphere",
+      },
     },
     dropoffLocation: {
       lat: { type: Number, required: true },
@@ -74,8 +87,11 @@ const rideBookingSchema = new mongoose.Schema(
       required: false,
       default: "Cash",
     },
+    created_at: { type: Date, default: Date.now },
   },
   { timestamps: true },
 );
+
+rideBookingSchema.index({ pickupLocation: "2dsphere" });
 
 module.exports = mongoose.model("RideBooking", rideBookingSchema);

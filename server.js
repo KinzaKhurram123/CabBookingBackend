@@ -17,6 +17,9 @@ app.use("/api/users", require("./routes/userRoutes"));
 app.use("/api/ride", require("./routes/rideBookingRoutes"));
 app.use("/api/rider", require("./routes/riderRoutes"));
 app.use("/api-docs", swaggerUI.serve, swaggerUI.setup(swaggerSpec));
+app.use("/api/parcel", require("./routes/percelBookingRoutes"));
+app.use("/api/pet", require("./routes/petBookingRoutes"));
+
 app.get("/test", (req, res) => {
   res.json({ message: "Backend is alive!" });
 });
