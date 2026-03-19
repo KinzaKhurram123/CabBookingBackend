@@ -5,7 +5,7 @@ const {
   getParcelBookingById,
   cancelParcelBooking,
 } = require("../controllers/parcelBookingController");
-const protect = require("../middleware/authMiddleware");
+const { protect } = require("../middleware/authMiddleware");
 
 router.post("/create", protect, createParcelBooking);
 router.put("/cancel/:id", protect, cancelParcelBooking);

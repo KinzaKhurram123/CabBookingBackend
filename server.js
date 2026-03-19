@@ -5,6 +5,7 @@ const connectDB = require("./config/db");
 const errorHandler = require("./middleware/errorMiddlerware");
 const swaggerUI = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
+const { db } = require("./models/rideBooking");
 
 dotenv.config();
 connectDB();

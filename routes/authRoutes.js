@@ -6,6 +6,7 @@ const {
   conformationPassword,
   resetPassword,
   getProfile,
+  getUserProfile,
   updateProfile,
 } = require("../controllers/authController");
 

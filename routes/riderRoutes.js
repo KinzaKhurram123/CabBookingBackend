@@ -4,7 +4,7 @@ const {
   updateRiderProfile,
   updateRiderLocation,
 } = require("../controllers/riderController");
-const protect = require("../middleware/authMiddleware");
+const { protect } = require("../middleware/authMiddleware");
 
 router.post("/riderprofile", protect, updateRiderProfile);
 router.post("/update_location", protect, updateRiderLocation);

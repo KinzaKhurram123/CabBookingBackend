@@ -15,7 +15,6 @@ const rideBookingSchema = new mongoose.Schema(
     selectedVehicle: {
       type: String,
       enum: ["cab", "bike", "economy", "sedan", "suv", "luxury"],
-      required: true,
     },
     pickupLocation: {
       type: {
