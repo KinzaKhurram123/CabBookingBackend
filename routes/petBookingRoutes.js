@@ -10,9 +10,9 @@ const {
 
 router.post("/pet_delivery_booking", protect, createPetDeliveryBooking);
 
-router.get("/get_pet-delivery", getAllPetDeliveryBookings);
+router.get("/get_pet_delivery", getAllPetDeliveryBookings);
 
-router.get("/pet-delivery/:id", getPetDeliveryBookingById);
+router.get("/pet_delivery/:id", getPetDeliveryBookingById);
 
 router.put("/pet-delivery/:id/cancel", cancelPetDeliveryBooking);
 
