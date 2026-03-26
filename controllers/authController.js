@@ -36,19 +36,133 @@ exports.registerUser = async (req, res) => {
   }
 };
 
-exports.loginUser = async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email });
+exports.driverSignup = async (req, res) => {
+  try {
+    const { name, email, password, phoneNumber, city, country } = req.body;
+    const userExists = await User.findOne({ email });
+    if (userExists) {
+      return res.status(400).json({
+        success: false,
+        message: "User already exists with this email",
+      });
+    }
 
-  if (user && (await bcrypt.compare(password, user.password))) {
-    res.json({
-      _id: user.id,
-      name: user.name,
-      email: user.email,
-      token: generateToken(user.id),
+    const user = await User.create({
+      name,
+      email,
+      password,
+      phoneNumber,
+      city,
+      country,
+      role: "driver",
+      driverDetails: {
+        isVerified: false,
+        verificationStatus: "pending",
+        status: "pending_verification",
+        documents: {
+          license: { status: "pending" },
+          insurance: { status: "pending" },
+          profilePhoto: { status: "pending" },
+          vehicleRegistration: { status: "pending" },
+        },
+        vehicleDetails: {},
+        termsAccepted: false,
+      },
     });
-  } else {
-    res.status(401).json({ message: "Invalid credentials" });
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    res.status(201).json({
+      success: true,
+      message:
+        "Driver account created successfully. Please complete your profile to start driving.",
+      data: {
+        user: userResponse,
+        token: generateToken(user._id),
+        onboardingRequired: true,
+        onboardingSteps: {
+          vehicleDetails: false,
+          license: false,
+          insurance: false,
+          profilePhoto: false,
+          termsAccepted: false,
+        },
+        notificationMessage:
+          "As soon as your account is verified, we will send you a notification.",
+      },
+    });
+  } catch (error) {
+    console.error("Driver signup error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.loginUser = async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    const isPasswordMatch = await user.comparePassword(password);
+    if (!isPasswordMatch) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid email or password",
+      });
+    }
+
+    const userResponse = user.toObject();
+    delete userResponse.password;
+
+    let responseData = {
+      success: true,
+      message: "Login successful",
+      data: {
+        user: userResponse,
+        token: generateToken(user._id),
+      },
+    };
+    if (user.role === "driver") {
+      const isOnboardingComplete =
+        user.driverDetails.termsAccepted &&
+        user.driverDetails.documents.license.licenseNumber &&
+        user.driverDetails.documents.insurance.documentUrl &&
+        user.driverDetails.documents.profilePhoto.url &&
+        user.driverDetails.vehicleDetails.licensePlate;
+
+      responseData.data.onboardingRequired = !isOnboardingComplete;
+      responseData.data.verificationStatus =
+        user.driverDetails.verificationStatus;
+      responseData.data.isVerified = user.driverDetails.isVerified;
+
+      if (
+        !user.driverDetails.isVerified &&
+        user.driverDetails.verificationStatus === "pending"
+      ) {
+        responseData.data.notificationMessage =
+          "As soon as your account is verified, we will send you a notification.";
+      }
+    }
+
+    res.status(200).json(responseData);
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 

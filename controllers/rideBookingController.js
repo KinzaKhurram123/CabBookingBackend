@@ -633,7 +633,9 @@ exports.getUserRideHistory = async (req, res) => {
 exports.acceptRide = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const userId = req.user._id;
+
+    console.log("USER:", req.user);
 
     const booking = await RideBooking.findById(bookingId);
     if (!booking) {
@@ -650,11 +652,12 @@ exports.acceptRide = async (req, res) => {
       });
     }
 
-    const rider = await Rider.findById(riderId);
+    const rider = await Rider.findOne({ userId: userId });
+
     if (!rider) {
       return res.status(404).json({
         success: false,
-        message: "Rider not found",
+        message: "Rider not found for this user",
       });
     }
 
@@ -666,13 +669,16 @@ exports.acceptRide = async (req, res) => {
     }
 
     booking.status = "accepted";
-    booking.driver = riderId;
+
+    booking.driver = rider._id;
+
     booking.acceptedAt = new Date();
 
     if (!booking.statusHistory) booking.statusHistory = [];
+
     booking.statusHistory.push({
       status: "accepted",
-      changedBy: riderId,
+      changedBy: rider._id,
       userRole: "driver",
       reason: "Ride accepted by rider",
       changedAt: new Date(),
@@ -688,12 +694,13 @@ exports.acceptRide = async (req, res) => {
       .populate({
         path: "driver",
         populate: {
-          path: "riderId",
-          select: "vehicleDetails rating totalRides",
+          path: "userId",
+          select: "name email phoneNumber profileImage",
         },
       })
       .lean();
-    const riderDetails = await Rider.findById(riderId)
+
+    const riderDetails = await Rider.findById(rider._id)
       .select("vehicleDetails rating totalRides location isAvailable")
       .lean();
 
@@ -705,7 +712,7 @@ exports.acceptRide = async (req, res) => {
         riderInfo: {
           id: rider._id,
           name: req.user.name,
-          phone: req.user.phone,
+          phone: req.user.phoneNumber,
           email: req.user.email,
           profileImage: req.user.profileImage,
           vehicleDetails: riderDetails?.vehicleDetails || {},
