@@ -18,8 +18,16 @@ const UserSchema = new mongoose.Schema(
 
     zipPostelCode: { type: String },
     city: { type: String },
-    country: { type: String, default: "Pakistan" },
-
+    country: { type: String },
+    stripeCustomerId: {
+      type: String,
+      sparse: true,
+      index: true,
+    },
+    defaultPaymentMethod: {
+      type: String,
+      default: null,
+    },
     role: {
       type: String,
       enum: ["customer", "driver"],

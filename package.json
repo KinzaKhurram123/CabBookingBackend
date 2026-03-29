@@ -12,16 +12,20 @@
   "dependencies": {
     "bcryptjs": "^2.4.3",
     "cloudinary": "^2.9.0",
-    "cors": "^2.8.5",
+    "cors": "^2.8.6",
     "cross-env": "^10.1.0",
     "dotenv": "^16.6.1",
-    "express": "^4.21.2",
+    "express": "^4.22.1",
     "geolib": "^3.3.4",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.23.0",
     "multer": "^2.1.1",
     "nodemailer": "^6.10.0",
+    "stripe": "^21.0.1",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
   }
 }

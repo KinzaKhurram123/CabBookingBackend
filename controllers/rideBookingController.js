@@ -3,6 +3,7 @@ const User = require("../models/user");
 const Rider = require("../models/riderModel");
 const parcelBooking = require("../models/parcelBooking");
 const petDeliveryBooking = require("../models/petDeliveryBooking");
+const stripe = require("../config/stripe");
 
 const calculateEstimatedArrival = (duration, startTime) => {
   const durationInMs = parseFloat(duration) * 60 * 1000;
@@ -48,6 +49,13 @@ exports.createRideBooking = async (req, res) => {
       });
     }
 
+    if (!req.body.selectedVehicle) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected vehicle is required",
+      });
+    }
+
     const user = await User.findById(req.user._id).select("-password");
     if (!user) {
       return res.status(404).json({
@@ -56,8 +64,41 @@ exports.createRideBooking = async (req, res) => {
       });
     }
 
+    if (req.body.paymentMethod === "Card" && !user.defaultPaymentMethod) {
+      return res.status(400).json({
+        success: false,
+        message: "Please add a payment method before booking",
+        requiresPaymentSetup: true,
+      });
+    }
+
     const dropoffLocation =
       req.body.dropoffLocation || req.body.dropOffLocation;
+    const fare = req.body.fare || req.body.price || 0;
+
+    let paymentIntent = null;
+
+    if (req.body.paymentMethod === "Card") {
+      paymentIntent = await stripe.paymentIntents.create({
+        amount: Math.round(fare * 100),
+        currency: "usd",
+        customer: user.stripeCustomerId,
+        payment_method: user.defaultPaymentMethod,
+        capture_method: "manual",
+        metadata: {
+          bookingType: "ride",
+          userId: req.user._id.toString(),
+          pickupLocation: JSON.stringify(req.body.pickupLocation),
+          dropLocation: JSON.stringify(dropoffLocation),
+          fare: fare.toString(),
+          vehicleId:
+            req.body.selectedVehicle.id || req.body.selectedVehicle.vehicleId,
+          vehicleName: req.body.selectedVehicle.name,
+        },
+        confirm: true,
+        off_session: true,
+      });
+    }
 
     const rideBooking = new RideBooking({
       user: req.user._id,
@@ -67,6 +108,9 @@ exports.createRideBooking = async (req, res) => {
       fare: req.body.fare,
       distance: req.body.distance,
       time: req.body.time,
+      paymentIntentId: paymentIntent ? paymentIntent.id : null,
+      paymentStatus: paymentIntent ? "authorized" : "pending",
+      paymentType: req.body.paymentMethod === "Card" ? "Card" : "Cash",
       date: req.body.date || new Date().toISOString().split("T")[0],
       status: req.body.status || "pending",
       pickupLocationName: req.body.pickupLocationName,
@@ -74,6 +118,15 @@ exports.createRideBooking = async (req, res) => {
       duration: req.body.duration,
       paymentMethod: req.body.paymentMethod || "cash",
       price: req.body.price,
+      selectedVehicle: {
+        id: req.body.selectedVehicle.id || req.body.selectedVehicle.vehicleId,
+        name: req.body.selectedVehicle.name,
+        features: req.body.selectedVehicle.features,
+        capacity: req.body.selectedVehicle.capacity,
+        price: req.body.selectedVehicle.price || "varies",
+        time:
+          req.body.selectedVehicle.time || "Real time in Minutes, wait time",
+      },
     });
 
     const savedBooking = await rideBooking.save();
@@ -91,6 +144,7 @@ exports.createRideBooking = async (req, res) => {
         message: "Invalid pickup location coordinates",
       });
     }
+
     const nearbyRiders = await Rider.find({
       location: {
         $near: {
@@ -114,7 +168,8 @@ exports.createRideBooking = async (req, res) => {
       booking: {
         ...populatedBooking,
         estimatedArrival,
-
+        paymentStatus: paymentIntent ? "authorized" : "pending",
+        paymentType: req.body.paymentMethod === "Card" ? "Card" : "Cash",
         customerDetails: {
           id: user._id,
           name: user.name,
@@ -122,8 +177,16 @@ exports.createRideBooking = async (req, res) => {
           phone: user.phone,
           profileImage: user.profileImage,
         },
+        selectedVehicle: {
+          id: req.body.selectedVehicle.id || req.body.selectedVehicle.vehicleId,
+          name: req.body.selectedVehicle.name,
+          features: req.body.selectedVehicle.features,
+          capacity: req.body.selectedVehicle.capacity,
+          price: req.body.selectedVehicle.price || "varies",
+          time:
+            req.body.selectedVehicle.time || "Real time in Minutes, wait time",
+        },
       },
-
       summary: {
         bookingId: populatedBooking._id,
         pickup: populatedBooking.pickupLocationName,
@@ -133,20 +196,34 @@ exports.createRideBooking = async (req, res) => {
         duration: populatedBooking.duration,
         customerName: user.name,
         customerPhone: user.phone,
+        vehicleName: req.body.selectedVehicle.name,
+        vehicleCapacity: req.body.selectedVehicle.capacity,
       },
-
       nearbyRiders,
-
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error("Create ride error:", error);
+    if (error.type === "StripeCardError") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Your card was declined. Please use a different payment method.",
+        error: error.message,
+      });
+    }
 
+    if (error.code === "authentication_required") {
+      return res.status(400).json({
+        success: false,
+        message: "Authentication required for this payment. Please try again.",
+        requiresAuthentication: true,
+      });
+    }
     return res.status(500).json({
       success: false,
       message: "Internal server error",
       error: error.message,
-
       stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
@@ -361,6 +438,31 @@ exports.cancelRideBooking = async (req, res) => {
       });
     }
 
+    let paymentCancellationResult = null;
+
+    if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
+      try {
+        const cancelledPayment = await stripe.paymentIntents.cancel(
+          booking.paymentIntentId,
+        );
+
+        paymentCancellationResult = {
+          success: true,
+          status: cancelledPayment.status,
+          message: "Payment hold released successfully",
+        };
+        booking.paymentStatus = "cancelled";
+      } catch (paymentError) {
+        console.error("Payment cancel error:", paymentError);
+        paymentCancellationResult = {
+          success: false,
+          error: paymentError.message,
+          message:
+            "Payment could not be released automatically. Please contact support.",
+        };
+      }
+    }
+
     booking.status = "cancelled";
     booking.cancellationDetails = {
       cancelledAt: new Date(),
@@ -441,6 +543,29 @@ exports.driverCancelRideBooking = async (req, res) => {
       });
     }
 
+    let paymentCancellationResult = null;
+    if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
+      try {
+        const cancelledPayment = await stripe.paymentIntents.cancel(
+          booking.paymentIntentId,
+        );
+
+        paymentCancellationResult = {
+          success: true,
+          status: cancelledPayment.status,
+          message: "Payment hold released",
+        };
+        booking.paymentStatus = "cancelled";
+      } catch (paymentError) {
+        console.error("Payment cancel error:", paymentError);
+        paymentCancellationResult = {
+          success: false,
+          error: paymentError.message,
+          message: "Payment hold could not be released",
+        };
+      }
+    }
+
     booking.status = "cancelled";
     booking.cancellationDetails = {
       cancelledAt: new Date(),
@@ -462,6 +587,7 @@ exports.driverCancelRideBooking = async (req, res) => {
       success: true,
       message: "Ride cancelled successfully by driver",
       booking: updatedBooking,
+      payment: paymentCancellationResult,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -981,6 +1107,37 @@ exports.completeRide = async (req, res) => {
       });
     }
 
+    let paymentCaptureResult = null;
+    if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
+      try {
+        const capturedPayment = await stripe.paymentIntents.capture(
+          booking.paymentIntentId,
+        );
+
+        if (capturedPayment.status === "succeeded") {
+          paymentCaptureResult = {
+            success: true,
+            amount: capturedPayment.amount / 100,
+            status: "captured",
+            transactionId: capturedPayment.id,
+          };
+          booking.paymentStatus = "captured";
+        } else {
+          throw new Error(
+            "Payment capture failed with status: " + capturedPayment.status,
+          );
+        }
+      } catch (paymentError) {
+        console.error("Payment capture error:", paymentError);
+        return res.status(400).json({
+          success: false,
+          message: "Payment failed. Ride cannot be completed.",
+          error: paymentError.message,
+          paymentError: true,
+        });
+      }
+    }
+
     booking.status = "completed";
     booking.completedAt = new Date();
 
@@ -999,6 +1156,10 @@ exports.completeRide = async (req, res) => {
       $set: { isAvailable: true },
     });
 
+    const finalFare = booking.fare;
+    const platformCommission = finalFare * 0.2;
+    const driverEarnings = finalFare * 0.8;
+
     return res.status(200).json({
       success: true,
       message: "Ride completed successfully",
@@ -1009,6 +1170,14 @@ exports.completeRide = async (req, res) => {
         fare: booking.fare,
         distance: booking.distance,
         duration: booking.duration,
+        paymentStatus: booking.paymentStatus,
+        paymentType: booking.paymentType,
+      },
+      payment: paymentCaptureResult,
+      earnings: {
+        totalFare: finalFare,
+        platformCommission: platformCommission,
+        driverEarnings: driverEarnings,
       },
       summary: {
         totalTime:

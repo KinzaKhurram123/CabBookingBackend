@@ -133,6 +133,7 @@ exports.loginUser = async (req, res) => {
         token: generateToken(user._id),
       },
     };
+
     if (user.role === "driver") {
       const isOnboardingComplete =
         user.driverDetails.termsAccepted &&
@@ -145,6 +146,7 @@ exports.loginUser = async (req, res) => {
       responseData.data.verificationStatus =
         user.driverDetails.verificationStatus;
       responseData.data.isVerified = user.driverDetails.isVerified;
+      responseData.data.driverDetails = user.driverDetails;
 
       if (
         !user.driverDetails.isVerified &&

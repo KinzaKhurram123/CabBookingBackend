@@ -13,8 +13,41 @@ const rideBookingSchema = new mongoose.Schema(
       required: true,
     },
     selectedVehicle: {
+      id: {
+        type: String,
+        required: true,
+      },
+      name: {
+        type: String,
+        required: true,
+      },
+      features: {
+        type: String,
+        required: true,
+      },
+      capacity: {
+        type: Number,
+        required: true,
+      },
+      price: {
+        type: String,
+        default: "varies",
+      },
+      time: {
+        type: String,
+        default: "Real time in Minutes, wait time",
+      },
+    },
+    paymentIntentId: { type: String },
+    paymentStatus: {
       type: String,
-      enum: ["cab", "bike", "economy", "sedan", "suv", "luxury"],
+      enum: ["pending", "authorized", "captured", "failed", "refunded"],
+    },
+    paymentType: {
+      type: String,
+      enum: ["Cash", "Card"],
+      required: false,
+      default: "Cash",
     },
     pickupLocation: {
       type: {
@@ -74,18 +107,7 @@ const rideBookingSchema = new mongoose.Schema(
     price: {
       type: String,
     },
-    paymentStatus: {
-      type: String,
-      enum: ["pending", "completed"],
-      default: "pending",
-      required: false,
-    },
-    paymentType: {
-      type: String,
-      enum: ["Cash", "Card"],
-      required: false,
-      default: "Cash",
-    },
+
     created_at: { type: Date, default: Date.now },
   },
   { timestamps: true },
