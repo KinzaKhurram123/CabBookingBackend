@@ -11,7 +11,6 @@ const {
   submitForVerification,
   getOnboardingStatus,
   updateRiderProfile,
-  updateRiderLocation,
   getPendingVerifications,
   approveRider,
   rejectRider,
@@ -26,7 +25,6 @@ router.post("/onboarding/submit", protect, submitForVerification);
 router.get("/onboarding/status", protect, getOnboardingStatus);
 
 router.put("/profile", protect, updateRiderProfile);
-router.put("/location", protect, updateRiderLocation);
 
 router.get("/admin/pending", protect, adminProtect, getPendingVerifications);
 router.put("/admin/approve/:riderId", protect, adminProtect, approveRider);

@@ -21,7 +21,6 @@ const {
 } = require("../controllers/rideBookingController");
 const { protect, authorize } = require("../middleware/authMiddleware");
 
-const RideBooking = require("../models/rideBooking");
 const {
   setupPaymentMethod,
   getUserCards,
@@ -30,6 +29,16 @@ const {
   getPaymentStatus,
 } = require("../controllers/paymentController");
 
+// Check if functions exist
+console.log("Imported functions:", {
+  acceptRide: typeof acceptRide,
+  riderOnTheWay: typeof riderOnTheWay,
+  reachedPickup: typeof reachedPickup,
+  startRide: typeof startRide,
+  completeRide: typeof completeRide,
+});
+
+// Public routes
 router.post("/ridebook", protect, createRideBooking);
 router.get("/nearby", getNearbyRides);
 router.get("/all_rides", getAllRides);
@@ -48,9 +57,8 @@ router.put(
 );
 router.get("/bookings/cancelled", getCancelledBookings);
 
-// Driver Ride status Routes
-
-router.put("/:bookingId/accept", protect, authorize("driver"), acceptRide);
+// Driver routes
+router.put("/accept_ride/:bookingId", protect, authorize("driver"), acceptRide);
 router.put(
   "/:bookingId/on-the-way",
   protect,

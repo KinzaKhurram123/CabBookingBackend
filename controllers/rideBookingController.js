@@ -1,19 +1,13 @@
+const mongoose = require("mongoose");
 const RideBooking = require("../models/rideBooking");
 const User = require("../models/user");
 const Rider = require("../models/riderModel");
 const parcelBooking = require("../models/parcelBooking");
 const petDeliveryBooking = require("../models/petDeliveryBooking");
+const { chargeCard } = require("./paymentController");
 const stripe = require("../config/stripe");
 
-const calculateEstimatedArrival = (duration, startTime) => {
-  const durationInMs = parseFloat(duration) * 60 * 1000;
-  const arrivalTime = new Date(startTime.getTime() + durationInMs);
-  return arrivalTime.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
+// Helper function for calculating distance
 function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -30,6 +24,32 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// Helper function for calculating estimated arrival
+const calculateEstimatedArrival = (duration, startTime) => {
+  const durationInMs = parseFloat(duration) * 60 * 1000;
+  const arrivalTime = new Date(startTime.getTime() + durationInMs);
+  return arrivalTime.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+// Helper function for status progress
+function getStatusProgress(status) {
+  const statusOrder = {
+    pending: 0,
+    accepted: 20,
+    onTheWay: 40,
+    reachedPickup: 60,
+    ongoing: 80,
+    completed: 100,
+    cancelled: 0,
+    rejected: 0,
+  };
+  return statusOrder[status] || 0;
+}
+
+// CREATE RIDE
 exports.createRideBooking = async (req, res) => {
   try {
     const requiredFields = ["category", "pickupLocation"];
@@ -229,6 +249,7 @@ exports.createRideBooking = async (req, res) => {
   }
 };
 
+// GET NEARBY RIDES
 exports.getNearbyRides = async (req, res) => {
   try {
     let { latitude, longitude, radius = 5 } = req.query;
@@ -255,7 +276,9 @@ exports.getNearbyRides = async (req, res) => {
           $maxDistance: radius,
         },
       },
-    }).lean();
+    })
+      .populate("user")
+      .lean();
 
     console.log("Found rides:", rides.length);
 
@@ -284,6 +307,7 @@ exports.getNearbyRides = async (req, res) => {
   }
 };
 
+// GET ALL RIDES
 exports.getAllRides = async (req, res) => {
   try {
     const {
@@ -312,12 +336,36 @@ exports.getAllRides = async (req, res) => {
     const sortOptions = {};
     sortOptions[sortBy] = sortOrder === "desc" ? -1 : 1;
 
-    const rides = await RideBooking.find(filter)
-      .sort(sortOptions)
-      .skip(skip)
-      .limit(parseInt(limit))
-      .populate("user", "name email phone")
-      .lean();
+    const rides = await RideBooking.aggregate([
+      { $match: filter },
+      { $sort: sortOptions },
+      { $skip: skip },
+      { $limit: parseInt(limit) },
+      {
+        $lookup: {
+          from: "users",
+          localField: "user",
+          foreignField: "_id",
+          as: "userDetails",
+        },
+      },
+      {
+        $unwind: {
+          path: "$userDetails",
+          preserveNullAndEmptyArrays: false,
+        },
+      },
+      {
+        $addFields: {
+          user: "$userDetails",
+        },
+      },
+      {
+        $project: {
+          userDetails: 0,
+        },
+      },
+    ]);
 
     const totalRides = await RideBooking.countDocuments(filter);
 
@@ -339,6 +387,7 @@ exports.getAllRides = async (req, res) => {
   }
 };
 
+// DEBUG NEARBY RIDES
 exports.debugNearbyRides = async (req, res) => {
   try {
     const { latitude, longitude } = req.query;
@@ -381,6 +430,20 @@ exports.debugNearbyRides = async (req, res) => {
   }
 };
 
+// TEST RIDE STRUCTURE
+exports.testRideStructure = async (req, res) => {
+  try {
+    const sample = await RideBooking.findOne();
+    res.json({
+      structure: sample ? Object.keys(sample.toObject()) : "No rides found",
+      sample: sample || null,
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// GET ALL RIDES FOR DRIVER
 exports.getAllRidesForDriver = async (req, res) => {
   try {
     const driverId = req.user._id;
@@ -400,6 +463,7 @@ exports.getAllRidesForDriver = async (req, res) => {
   }
 };
 
+// CANCEL RIDE BOOKING
 exports.cancelRideBooking = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -505,6 +569,7 @@ exports.cancelRideBooking = async (req, res) => {
   }
 };
 
+// DRIVER CANCEL RIDE BOOKING
 exports.driverCancelRideBooking = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -601,6 +666,7 @@ exports.driverCancelRideBooking = async (req, res) => {
   }
 };
 
+// ADMIN CANCEL RIDE BOOKING
 exports.adminCancelRideBooking = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -656,6 +722,7 @@ exports.adminCancelRideBooking = async (req, res) => {
   }
 };
 
+// GET CANCELLED BOOKINGS
 exports.getCancelledBookings = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -695,6 +762,7 @@ exports.getCancelledBookings = async (req, res) => {
   }
 };
 
+// GET USER RIDE HISTORY
 exports.getUserRideHistory = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -756,20 +824,39 @@ exports.getUserRideHistory = async (req, res) => {
   }
 };
 
+// ACCEPT RIDE
 exports.acceptRide = async (req, res) => {
   try {
-    const { bookingId } = req.params;
+    const bookingId = req.params.bookingId || req.body.bookingId;
     const userId = req.user._id;
 
-    console.log("USER:", req.user);
+    console.log("Accept Ride - Booking ID:", bookingId);
+    console.log("Accept Ride - User ID:", userId);
+
+    if (!bookingId) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking ID is required",
+      });
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid booking ID format",
+      });
+    }
 
     const booking = await RideBooking.findById(bookingId);
+
     if (!booking) {
       return res.status(404).json({
         success: false,
         message: "Booking not found",
       });
     }
+
+    console.log("Booking found:", booking._id, "Status:", booking.status);
 
     if (booking.status !== "pending") {
       return res.status(400).json({
@@ -795,9 +882,7 @@ exports.acceptRide = async (req, res) => {
     }
 
     booking.status = "accepted";
-
     booking.driver = rider._id;
-
     booking.acceptedAt = new Date();
 
     if (!booking.statusHistory) booking.statusHistory = [];
@@ -815,7 +900,7 @@ exports.acceptRide = async (req, res) => {
     const updatedBooking = await RideBooking.findById(booking._id)
       .populate({
         path: "user",
-        select: "name email phone profileImage",
+        select: "name email phoneNumber profileImage role",
       })
       .populate({
         path: "driver",
@@ -863,6 +948,7 @@ exports.acceptRide = async (req, res) => {
   }
 };
 
+// RIDER ON THE WAY
 exports.riderOnTheWay = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -954,6 +1040,7 @@ exports.riderOnTheWay = async (req, res) => {
   }
 };
 
+// REACHED PICKUP
 exports.reachedPickup = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -1014,6 +1101,7 @@ exports.reachedPickup = async (req, res) => {
   }
 };
 
+// START RIDE
 exports.startRide = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -1080,6 +1168,7 @@ exports.startRide = async (req, res) => {
   }
 };
 
+// COMPLETE RIDE
 exports.completeRide = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -1110,9 +1199,7 @@ exports.completeRide = async (req, res) => {
     let paymentCaptureResult = null;
     if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
       try {
-        const capturedPayment = await stripe.paymentIntents.capture(
-          booking.paymentIntentId,
-        );
+        const capturedPayment = await chargeCard(booking);
 
         if (capturedPayment.status === "succeeded") {
           paymentCaptureResult = {
@@ -1198,6 +1285,7 @@ exports.completeRide = async (req, res) => {
   }
 };
 
+// GET RIDE STATUS
 exports.getRideStatus = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -1276,16 +1364,49 @@ exports.getRideStatus = async (req, res) => {
   }
 };
 
-function getStatusProgress(status) {
-  const statusOrder = {
-    pending: 0,
-    accepted: 20,
-    onTheWay: 40,
-    reachedPickup: 60,
-    ongoing: 80,
-    completed: 100,
-    cancelled: 0,
-    rejected: 0,
-  };
-  return statusOrder[status] || 0;
-}
+// DUMMY FUNCTIONS FOR PAYMENT (if not already defined)
+exports.setupPaymentMethod = async (req, res) => {
+  res.status(200).json({ success: true, message: "Setup payment method" });
+};
+
+exports.getUserCards = async (req, res) => {
+  res.status(200).json({ success: true, cards: [] });
+};
+
+exports.setDefaultCard = async (req, res) => {
+  res.status(200).json({ success: true, message: "Default card set" });
+};
+
+exports.removeCard = async (req, res) => {
+  res.status(200).json({ success: true, message: "Card removed" });
+};
+
+exports.getPaymentStatus = async (req, res) => {
+  res.status(200).json({ success: true, status: "pending" });
+};
+
+// FINAL EXPORT - MAKE SURE THIS IS AT THE END
+module.exports = {
+  createRideBooking: exports.createRideBooking,
+  getNearbyRides: exports.getNearbyRides,
+  getAllRides: exports.getAllRides,
+  debugNearbyRides: exports.debugNearbyRides,
+  testRideStructure: exports.testRideStructure,
+  getAllRidesForDriver: exports.getAllRidesForDriver,
+  cancelRideBooking: exports.cancelRideBooking,
+  driverCancelRideBooking: exports.driverCancelRideBooking,
+  adminCancelRideBooking: exports.adminCancelRideBooking,
+  getCancelledBookings: exports.getCancelledBookings,
+  getUserRideHistory: exports.getUserRideHistory,
+  acceptRide: exports.acceptRide,
+  riderOnTheWay: exports.riderOnTheWay,
+  reachedPickup: exports.reachedPickup,
+  startRide: exports.startRide,
+  completeRide: exports.completeRide,
+  getRideStatus: exports.getRideStatus,
+  setupPaymentMethod: exports.setupPaymentMethod,
+  getUserCards: exports.getUserCards,
+  setDefaultCard: exports.setDefaultCard,
+  removeCard: exports.removeCard,
+  getPaymentStatus: exports.getPaymentStatus,
+};

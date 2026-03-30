@@ -8,9 +8,16 @@ const swaggerSpec = require("./swagger");
 const { db } = require("./models/rideBooking");
 const webhookRoutes = require("./routes/webhook");
 
+const http = require("http");
+const { initSocket } = require("./config/socket");
+
 dotenv.config();
 connectDB();
 const app = express();
+
+const server = http.createServer(app);
+const io = initSocket(server);
+
 app.use(express.json());
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
@@ -74,7 +81,7 @@ app.get("/api/test-stripe", (req, res) => {
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-app.listen(
+server.listen(
   PORT,
   "0.0.0.0",
   () => console.log(`Server running on port ${PORT}`),

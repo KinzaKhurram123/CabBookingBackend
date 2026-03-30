@@ -177,3 +177,18 @@ exports.getPaymentStatus = async (req, res) => {
     });
   }
 };
+
+exports.chargeCard = async (booking) => {
+  try {
+    if (booking.paymentIntentId) {
+      const paymentIntent = await stripe.paymentIntents.capture(
+        booking.paymentIntentId,
+      );
+      return paymentIntent;
+    }
+    return null;
+  } catch (error) {
+    console.error("Error charging card:", error);
+    throw error;
+  }
+};

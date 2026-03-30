@@ -410,19 +410,16 @@ exports.getOnboardingStatus = async (req, res) => {
     });
   }
 };
-
 exports.updateRiderProfile = async (req, res) => {
   try {
     const {
       phoneNumber,
       vehicleType,
       vehicleNumber,
-      licenseNumber,
       make,
       model,
       year,
       color,
-      licensePlate,
       address,
       city,
       emergencyContact,
@@ -437,15 +434,15 @@ exports.updateRiderProfile = async (req, res) => {
     if (city) updateData.city = city;
     if (emergencyContact) updateData.emergencyContact = emergencyContact;
 
-    if (make || model || year || color || licensePlate || vehicleType) {
+    // FIX: Change licensePlate to vehicleNumber
+    if (make || model || year || color || vehicleNumber || vehicleType) {
       updateData.vehicleDetails = {
-        make,
-        model,
-        year,
-        color,
-        licensePlate,
-        vehicleType,
-        vehicleNumber,
+        make: make || "",
+        model: model || "",
+        year: year || "",
+        color: color || "",
+        vehicleType: vehicleType || "",
+        vehicleNumber: vehicleNumber || "",
       };
     }
 
@@ -459,7 +456,8 @@ exports.updateRiderProfile = async (req, res) => {
       const userUpdate = {};
       if (req.body.name) userUpdate.name = req.body.name;
       if (req.body.email) userUpdate.email = req.body.email;
-      if (phoneNumber) userUpdate.phone = phoneNumber;
+      // FIX: Use phoneNumber from req.body, not from destructured
+      if (req.body.phoneNumber) userUpdate.phone = req.body.phoneNumber;
 
       await User.findByIdAndUpdate(req.user._id, { $set: userUpdate });
     }
@@ -476,45 +474,6 @@ exports.updateRiderProfile = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error while updating rider profile",
-      error: error.message,
-    });
-  }
-};
-
-exports.updateRiderLocation = async (req, res) => {
-  try {
-    const { latitude, longitude } = req.body;
-
-    if (latitude == null || longitude == null) {
-      return res.status(400).json({
-        success: false,
-        message: "Latitude and longitude are required",
-      });
-    }
-
-    await Rider.findOneAndUpdate(
-      { user: req.user._id },
-      {
-        location: {
-          type: "Point",
-          coordinates: [longitude, latitude],
-        },
-        updatedAt: new Date(),
-      },
-      { new: true, upsert: true },
-    );
-    const onboardingData = await getOnboardingData(req.user._id);
-
-    res.status(200).json({
-      success: true,
-      message: "Rider location updated successfully",
-      data: onboardingData,
-    });
-  } catch (error) {
-    console.error("Update rider location error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
       error: error.message,
     });
   }
