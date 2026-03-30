@@ -4,8 +4,6 @@ const {
   createRideBooking,
   getNearbyRides,
   getAllRides,
-  debugNearbyRides,
-  testRideStructure,
   getAllRidesForDriver,
   cancelRideBooking,
   driverCancelRideBooking,
@@ -29,16 +27,6 @@ const {
   getPaymentStatus,
 } = require("../controllers/paymentController");
 
-// Check if functions exist
-console.log("Imported functions:", {
-  acceptRide: typeof acceptRide,
-  riderOnTheWay: typeof riderOnTheWay,
-  reachedPickup: typeof reachedPickup,
-  startRide: typeof startRide,
-  completeRide: typeof completeRide,
-});
-
-// Public routes
 router.post("/ridebook", protect, createRideBooking);
 router.get("/nearby", getNearbyRides);
 router.get("/all_rides", getAllRides);
@@ -57,7 +45,6 @@ router.put(
 );
 router.get("/bookings/cancelled", getCancelledBookings);
 
-// Driver routes
 router.put("/accept_ride/:bookingId", protect, authorize("driver"), acceptRide);
 router.put(
   "/:bookingId/on-the-way",
@@ -75,11 +62,53 @@ router.put("/:bookingId/start", protect, authorize("driver"), startRide);
 router.put("/:bookingId/complete", protect, authorize("driver"), completeRide);
 router.get("/:bookingId/status", protect, getRideStatus);
 
-// PAYMENT METHOD ROUTES
 router.post("/payment/setup", protect, setupPaymentMethod);
 router.get("/payment/cards", protect, getUserCards);
 router.put("/payment/default-card", protect, setDefaultCard);
 router.delete("/payment/card/:paymentMethodId", protect, removeCard);
 router.get("/payment/status/:bookingId", protect, getPaymentStatus);
+
+const fixBookingStatus = async (req, res) => {
+  try {
+    const bookingId = req.params.bookingId;
+
+    const booking = await RideBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    console.log("Old status:", booking.status);
+    booking.status = "pending";
+    booking.updatedAt = new Date();
+    await booking.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Booking status changed from cancelled to pending",
+      booking: {
+        id: booking._id,
+        status: booking.status,
+        pickupLocation: booking.pickupLocationName,
+        dropoffLocation: booking.dropoffLocationName,
+      },
+    });
+  } catch (error) {
+    console.error("Error fixing booking:", error);
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+};
+
+router.put(
+  "/fix-booking-status/:bookingId",
+  protect,
+  authorize("admin", "driver"),
+  fixBookingStatus,
+);
 
 module.exports = router;
