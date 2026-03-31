@@ -1,4 +1,3 @@
-// RideType Model
 const mongoose = require("mongoose");
 
 const rideTypeSchema = new mongoose.Schema(

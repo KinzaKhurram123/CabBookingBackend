@@ -7,6 +7,7 @@ const swaggerUI = require("swagger-ui-express");
 const swaggerSpec = require("./swagger");
 const { db } = require("./models/rideBooking");
 const webhookRoutes = require("./routes/webhook");
+const cloudinary = require("cloudinary").v2;
 
 const http = require("http");
 const { initSocket } = require("./config/socket");
@@ -28,6 +29,7 @@ app.use("/api/ride", require("./routes/rideBookingRoutes"));
 app.use("/api/rider", require("./routes/riderRoutes"));
 app.use("/api-docs", swaggerUI.serve, swaggerUI.setup(swaggerSpec));
 app.use("/api/parcel", require("./routes/percelBookingRoutes"));
+app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api/pet", require("./routes/petBookingRoutes"));
 app.use("/api/webhook", webhookRoutes);
 app.use("/api", require("./routes/rideTypesRoutes"));
@@ -76,6 +78,12 @@ app.get("/api/test-stripe", (req, res) => {
     message: "Stripe is configured",
     stripeKey: process.env.STRIPE_PUBLISHABLE_KEY ? "Present" : "Missing",
   });
+});
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
 app.use(errorHandler);

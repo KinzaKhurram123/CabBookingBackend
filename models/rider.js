@@ -115,4 +115,8 @@ const rideBookingSchema = new mongoose.Schema(
 
 rideBookingSchema.index({ pickupLocation: "2dsphere" });
 
-module.exports = mongoose.model("RideBooking", rideBookingSchema);
+const RideBooking =
+  mongoose.models.RideBooking ||
+  mongoose.model("RideBooking", rideBookingSchema);
+
+module.exports = RideBooking; 

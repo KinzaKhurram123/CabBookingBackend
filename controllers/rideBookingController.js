@@ -381,6 +381,80 @@ exports.getAllRides = async (req, res) => {
   }
 };
 
+exports.acceptRide = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { bookingId } = req.params;
+    const rider = req.rider;
+
+    console.log("Rider trying to accept ride:", rider);
+
+    if (rider.status !== "available") {
+      return res
+        .status(400)
+        .json({ message: "You are not available to accept new rides" });
+    }
+
+    const booking = await RideBooking.findById(bookingId).session(session);
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    if (booking.status !== "pending") {
+      return res
+        .status(400)
+        .json({ message: "This ride is no longer available" });
+    }
+
+    if (booking.driver) {
+      return res
+        .status(400)
+        .json({
+          message: "This ride has already been accepted by another driver",
+        });
+    }
+
+    const distance = calculateDistance(
+      rider.location.coordinates[1],
+      rider.location.coordinates[0],
+      booking.pickupLocation.coordinates[1],
+      booking.pickupLocation.coordinates[0],
+    );
+
+    if (distance > 5) {
+      return res
+        .status(400)
+        .json({ message: "You are too far from the pickup location" });
+    }
+
+    booking.driver = rider._id;
+    booking.status = "accepted";
+    await booking.save();
+
+    rider.status = "busy";
+    rider.currentRide = booking._id;
+    await rider.save();
+
+    // TODO: Create a notification for the user
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      success: true,
+      message: "Ride accepted successfully",
+      booking,
+      rider,
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Accept ride error:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 exports.debugNearbyRides = async (req, res) => {
   try {
     const { latitude, longitude } = req.query;
@@ -810,161 +884,161 @@ exports.getUserRideHistory = async (req, res) => {
   }
 };
 
-exports.acceptRide = async (req, res) => {
-  try {
-    const bookingId = req.params.bookingId || req.body.bookingId;
-    const userId = req.user._id;
+// exports.acceptRide = async (req, res) => {
+//   try {
+//     const bookingId = req.params.bookingId || req.body.bookingId;
+//     const userId = req.user._id;
 
-    console.log("=== ACCEPT RIDE DEBUG ===");
-    console.log("Full URL params:", req.params);
-    console.log("Booking ID from params:", req.params.bookingId);
-    console.log("Booking ID from body:", req.body.bookingId);
-    console.log("Final bookingId:", bookingId);
-    console.log("Booking ID length:", bookingId?.length);
-    console.log("User ID:", userId);
-    console.log("========================");
+//     console.log("=== ACCEPT RIDE DEBUG ===");
+//     console.log("Full URL params:", req.params);
+//     console.log("Booking ID from params:", req.params.bookingId);
+//     console.log("Booking ID from body:", req.body.bookingId);
+//     console.log("Final bookingId:", bookingId);
+//     console.log("Booking ID length:", bookingId?.length);
+//     console.log("User ID:", userId);
+//     console.log("========================");
 
-    if (!bookingId) {
-      return res.status(400).json({
-        success: false,
-        message: "Booking ID is required",
-      });
-    }
+//     if (!bookingId) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Booking ID is required",
+//       });
+//     }
 
-    const allBookings = await RideBooking.find({});
-    console.log("Total bookings in DB:", allBookings.length);
-    console.log(
-      "All booking IDs in DB:",
-      allBookings.map((b) => b._id.toString()),
-    );
+//     const allBookings = await RideBooking.find({});
+//     console.log("Total bookings in DB:", allBookings.length);
+//     console.log(
+//       "All booking IDs in DB:",
+//       allBookings.map((b) => b._id.toString()),
+//     );
 
-    const idExists = allBookings.some(
-      (b) => b._id.toString() === bookingId.toString(),
-    );
-    console.log("ID exists in DB:", idExists);
+//     const idExists = allBookings.some(
+//       (b) => b._id.toString() === bookingId.toString(),
+//     );
+//     console.log("ID exists in DB:", idExists);
 
-    let booking;
-    try {
-      booking = await RideBooking.findById(bookingId);
-      console.log("Booking found by findById:", booking ? "YES" : "NO");
-    } catch (err) {
-      console.log("Error in findById:", err.message);
-    }
+//     let booking;
+//     try {
+//       booking = await RideBooking.findById(bookingId);
+//       console.log("Booking found by findById:", booking ? "YES" : "NO");
+//     } catch (err) {
+//       console.log("Error in findById:", err.message);
+//     }
 
-    if (!booking) {
-      console.log("Trying manual search...");
-      booking = await RideBooking.findOne({
-        _id: bookingId,
-      });
-      console.log("Manual search result:", booking ? "FOUND" : "NOT FOUND");
-    }
+//     if (!booking) {
+//       console.log("Trying manual search...");
+//       booking = await RideBooking.findOne({
+//         _id: bookingId,
+//       });
+//       console.log("Manual search result:", booking ? "FOUND" : "NOT FOUND");
+//     }
 
-    if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-        debug: {
-          receivedId: bookingId,
-          receivedIdType: typeof bookingId,
-          receivedIdString: bookingId.toString(),
-          totalBookingsInDB: allBookings.length,
-          availableIds: allBookings.map((b) => b._id.toString()),
-          suggestion: "Check if this ID matches any of the available IDs above",
-        },
-      });
-    }
+//     if (!booking) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Booking not found",
+//         debug: {
+//           receivedId: bookingId,
+//           receivedIdType: typeof bookingId,
+//           receivedIdString: bookingId.toString(),
+//           totalBookingsInDB: allBookings.length,
+//           availableIds: allBookings.map((b) => b._id.toString()),
+//           suggestion: "Check if this ID matches any of the available IDs above",
+//         },
+//       });
+//     }
 
-    console.log("Booking found:", booking._id, "Status:", booking.status);
+//     console.log("Booking found:", booking._id, "Status:", booking.status);
 
-    if (booking.status !== "pending") {
-      return res.status(400).json({
-        success: false,
-        message: `This ride is no longer available. Current status: ${booking.status}`,
-      });
-    }
+//     if (booking.status !== "pending") {
+//       return res.status(400).json({
+//         success: false,
+//         message: `This ride is no longer available. Current status: ${booking.status}`,
+//       });
+//     }
 
-    const rider = await Rider.findOne({ userId: userId });
+//     const rider = await Rider.findOne({ userId: userId });
 
-    if (!rider) {
-      return res.status(404).json({
-        success: false,
-        message: "Rider not found for this user",
-      });
-    }
+//     if (!rider) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Rider not found for this user",
+//       });
+//     }
 
-    if (rider.isAvailable === false) {
-      return res.status(400).json({
-        success: false,
-        message: "You are currently unavailable to accept rides",
-      });
-    }
+//     if (rider.isAvailable === false) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "You are currently unavailable to accept rides",
+//       });
+//     }
 
-    booking.status = "accepted";
-    booking.driver = rider._id;
-    booking.acceptedAt = new Date();
+//     booking.status = "accepted";
+//     booking.driver = rider._id;
+//     booking.acceptedAt = new Date();
 
-    if (!booking.statusHistory) booking.statusHistory = [];
+//     if (!booking.statusHistory) booking.statusHistory = [];
 
-    booking.statusHistory.push({
-      status: "accepted",
-      changedBy: rider._id,
-      userRole: "driver",
-      reason: "Ride accepted by rider",
-      changedAt: new Date(),
-    });
+//     booking.statusHistory.push({
+//       status: "accepted",
+//       changedBy: rider._id,
+//       userRole: "driver",
+//       reason: "Ride accepted by rider",
+//       changedAt: new Date(),
+//     });
 
-    await booking.save();
+//     await booking.save();
 
-    const updatedBooking = await RideBooking.findById(booking._id)
-      .populate({
-        path: "user",
-        select: "name email phoneNumber profileImage role",
-      })
-      .populate({
-        path: "driver",
-        populate: {
-          path: "userId",
-          select: "name email phoneNumber profileImage",
-        },
-      })
-      .lean();
+//     const updatedBooking = await RideBooking.findById(booking._id)
+//       .populate({
+//         path: "user",
+//         select: "name email phoneNumber profileImage role",
+//       })
+//       .populate({
+//         path: "driver",
+//         populate: {
+//           path: "userId",
+//           select: "name email phoneNumber profileImage",
+//         },
+//       })
+//       .lean();
 
-    const riderDetails = await Rider.findById(rider._id)
-      .select("vehicleDetails rating totalRides location isAvailable")
-      .lean();
+//     const riderDetails = await Rider.findById(rider._id)
+//       .select("vehicleDetails rating totalRides location isAvailable")
+//       .lean();
 
-    return res.status(200).json({
-      success: true,
-      message: "Ride accepted successfully",
-      booking: {
-        ...updatedBooking,
-        riderInfo: {
-          id: rider._id,
-          name: req.user.name,
-          phone: req.user.phoneNumber,
-          email: req.user.email,
-          profileImage: req.user.profileImage,
-          vehicleDetails: riderDetails?.vehicleDetails || {},
-          rating: riderDetails?.rating || 0,
-          totalRides: riderDetails?.totalRides || 0,
-          currentLocation: riderDetails?.location?.coordinates || null,
-        },
-      },
-      estimatedPickupTime: calculateEstimatedArrival(
-        booking.duration,
-        new Date(),
-      ),
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    console.error("Accept ride error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
-    });
-  }
-};
+//     return res.status(200).json({
+//       success: true,
+//       message: "Ride accepted successfully",
+//       booking: {
+//         ...updatedBooking,
+//         riderInfo: {
+//           id: rider._id,
+//           name: req.user.name,
+//           phone: req.user.phoneNumber,
+//           email: req.user.email,
+//           profileImage: req.user.profileImage,
+//           vehicleDetails: riderDetails?.vehicleDetails || {},
+//           rating: riderDetails?.rating || 0,
+//           totalRides: riderDetails?.totalRides || 0,
+//           currentLocation: riderDetails?.location?.coordinates || null,
+//         },
+//       },
+//       estimatedPickupTime: calculateEstimatedArrival(
+//         booking.duration,
+//         new Date(),
+//       ),
+//       timestamp: new Date().toISOString(),
+//     });
+//   } catch (error) {
+//     console.error("Accept ride error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//       error: error.message,
+//     });
+//   }
+// };
 
 exports.riderOnTheWay = async (req, res) => {
   try {

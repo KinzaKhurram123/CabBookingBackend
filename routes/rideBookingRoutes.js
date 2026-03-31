@@ -18,6 +18,7 @@ const {
   getRideStatus,
 } = require("../controllers/rideBookingController");
 const { protect, authorize } = require("../middleware/authMiddleware");
+const { riderProtect } = require("../middleware/riderAuthMiddleware");
 
 const {
   setupPaymentMethod,
@@ -45,21 +46,13 @@ router.put(
 );
 router.get("/bookings/cancelled", getCancelledBookings);
 
-router.put("/accept_ride/:bookingId", protect, authorize("driver"), acceptRide);
-router.put(
-  "/:bookingId/on-the-way",
-  protect,
-  authorize("driver"),
-  riderOnTheWay,
-);
-router.put(
-  "/:bookingId/reached-pickup",
-  protect,
-  authorize("driver"),
-  reachedPickup,
-);
-router.put("/:bookingId/start", protect, authorize("driver"), startRide);
-router.put("/:bookingId/complete", protect, authorize("driver"), completeRide);
+// router.put("/accept_ride/:bookingId", protect, authorize("driver"), acceptRide);
+
+router.put("/accept_ride/:bookingId", riderProtect, acceptRide);
+router.put("/:bookingId/on-the-way", protect, riderOnTheWay);
+router.put("/:bookingId/reached-pickup", protect, reachedPickup);
+router.put("/:bookingId/start", protect, startRide);
+router.put("/:bookingId/complete", protect, completeRide);
 router.get("/:bookingId/status", protect, getRideStatus);
 
 router.post("/payment/setup", protect, setupPaymentMethod);

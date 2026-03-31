@@ -1,7 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const { protect } = require("../middleware/authMiddleware");
-const { adminProtect } = require("../middleware/adminMiddleware");
 const {
   addVehicleDetails,
   uploadLicense,
@@ -14,20 +12,63 @@ const {
   getPendingVerifications,
   approveRider,
   rejectRider,
+  upload,
 } = require("../controllers/riderController");
+const { protect, authorize } = require("../middleware/authMiddleware");
+const {
+  protectAdmin,
+  superAdminOnly,
+  checkPermission,
+} = require("../middleware/adminMiddleware");
 
-router.post("/onboarding/vehicle", protect, addVehicleDetails);
-router.post("/onboarding/license", protect, uploadLicense);
-router.post("/onboarding/insurance", protect, uploadInsurance);
-router.post("/onboarding/profile_photo", protect, uploadProfilePhoto);
-router.post("/onboarding/accept-terms", protect, acceptTerms);
-router.post("/onboarding/submit", protect, submitForVerification);
-router.get("/onboarding/status", protect, getOnboardingStatus);
+router.use(protect);
 
-router.put("/profile", protect, updateRiderProfile);
+router.post("/vehicle-details", addVehicleDetails);
 
-router.get("/admin/pending", protect, adminProtect, getPendingVerifications);
-router.put("/admin/approve/:riderId", protect, adminProtect, approveRider);
-router.put("/admin/reject/:riderId", protect, adminProtect, rejectRider);
+router.post(
+  "/upload-license",
+  upload.fields([
+    { name: "frontImage", maxCount: 1 },
+    { name: "backImage", maxCount: 1 },
+  ]),
+  uploadLicense,
+);
+
+router.post("/upload-insurance", upload.single("insurance"), uploadInsurance);
+
+router.post(
+  "/upload-profile-photo",
+  upload.single("profilePhoto"),
+  uploadProfilePhoto,
+);
+
+router.post("/accept-terms", acceptTerms);
+
+router.post("/submit-verification", submitForVerification);
+
+router.get("/onboarding-status", getOnboardingStatus);
+
+router.put("/profile", updateRiderProfile);
+
+router.get(
+  "/admin/pending-verifications",
+  protectAdmin,
+  checkPermission("manageRiders"),
+  getPendingVerifications,
+);
+
+router.put(
+  "/admin/approve-rider/:riderId",
+  protectAdmin,
+  checkPermission("manageRiders"),
+  approveRider,
+);
+
+router.put(
+  "/admin/reject-rider/:riderId",
+  protectAdmin,
+  checkPermission("manageRiders"),
+  rejectRider,
+);
 
 module.exports = router;

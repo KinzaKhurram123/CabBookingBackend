@@ -54,6 +54,15 @@ const riderSchema = new mongoose.Schema({
       default: [0, 0],
     },
   },
+  status: {
+    type: String,
+    enum: ["available", "busy", "offline"],
+    default: "offline",
+  },
+  currentRide: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "RideBooking",
+  },
 });
 
 riderSchema.index({ location: "2dsphere" });

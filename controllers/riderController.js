@@ -1,5 +1,61 @@
 const Rider = require("../models/riderModel");
 const User = require("../models/user");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
+const cloudinary = require("cloudinary").v2;
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = "uploads/rider";
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+    cb(
+      null,
+      `temp-${req.user?._id || "user"}-${uniqueSuffix}${path.extname(file.originalname)}`,
+    );
+  },
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = /jpeg|jpg|png|gif/;
+  const extname = allowedTypes.test(
+    path.extname(file.originalname).toLowerCase(),
+  );
+  const mimetype = allowedTypes.test(file.mimetype);
+  if (mimetype && extname) {
+    return cb(null, true);
+  }
+  cb(new Error("Only image files are allowed"));
+};
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter,
+});
+
+const cleanupTempFile = (filePath) => {
+  try {
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      console.log(`Deleted temp file: ${filePath}`);
+    }
+  } catch (err) {
+    console.error(`Error deleting temp file: ${filePath}`, err);
+  }
+};
 
 const getOnboardingData = async (userId) => {
   const rider = await Rider.findOne({ user: userId }).populate(
@@ -16,9 +72,7 @@ const getOnboardingData = async (userId) => {
       email: rider.user.email,
       phoneNumber: rider.user.phoneNumber,
       role: rider.user.role,
-      profileImage:
-        rider.user.profileImage ||
-        "https://res.cloudinary.com/your-cloud/image/upload/v1/default-avatar.png",
+      profileImage: rider.user.profileImage || null,
       country: rider.user.country,
       city: rider.user.city,
       createdAt: rider.user.createdAt,
@@ -144,7 +198,6 @@ exports.addVehicleDetails = async (req, res) => {
       { new: true, upsert: true },
     );
 
-    // Get complete onboarding data
     const onboardingData = await getOnboardingData(req.user._id);
 
     res.status(200).json({
@@ -164,7 +217,35 @@ exports.addVehicleDetails = async (req, res) => {
 
 exports.uploadLicense = async (req, res) => {
   try {
-    const { licenseNumber, expiryDate, frontImage, backImage } = req.body;
+    const { licenseNumber, expiryDate } = req.body;
+
+    const front = req.files?.frontImage?.[0];
+    const back = req.files?.backImage?.[0];
+
+    if (!front || !back) {
+      return res.status(400).json({
+        success: false,
+        message: "Front and back images are required",
+      });
+    }
+
+    if (!licenseNumber || !expiryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "License number and expiry date are required",
+      });
+    }
+
+    const frontUpload = await cloudinary.uploader.upload(front.path, {
+      folder: "riders/license/front",
+    });
+
+    const backUpload = await cloudinary.uploader.upload(back.path, {
+      folder: "riders/license/back",
+    });
+
+    cleanupTempFile(front.path);
+    cleanupTempFile(back.path);
 
     await Rider.findOneAndUpdate(
       { user: req.user._id },
@@ -173,8 +254,8 @@ exports.uploadLicense = async (req, res) => {
           "documents.license": {
             licenseNumber,
             expiryDate: new Date(expiryDate),
-            frontImage,
-            backImage,
+            frontImage: frontUpload.secure_url,
+            backImage: backUpload.secure_url,
             status: "pending",
             uploadedAt: new Date(),
           },
@@ -203,8 +284,31 @@ exports.uploadLicense = async (req, res) => {
 
 exports.uploadInsurance = async (req, res) => {
   try {
-    const { provider, policyNumber, expiryDate, documentUrl } = req.body;
+    const { provider, policyNumber, expiryDate } = req.body;
 
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Insurance document is required",
+      });
+    }
+
+    if (!provider || !policyNumber || !expiryDate) {
+      return res.status(400).json({
+        success: false,
+        message: "Provider, policy number and expiry date are required",
+      });
+    }
+
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "riders/insurance",
+      resource_type: "auto",
+    });
+
+    // Clean up temp file
+    cleanupTempFile(req.file.path);
+
+    // Update database
     await Rider.findOneAndUpdate(
       { user: req.user._id },
       {
@@ -213,7 +317,7 @@ exports.uploadInsurance = async (req, res) => {
             provider,
             policyNumber,
             expiryDate: new Date(expiryDate),
-            documentUrl,
+            documentUrl: result.secure_url,
             status: "pending",
             uploadedAt: new Date(),
           },
@@ -242,14 +346,27 @@ exports.uploadInsurance = async (req, res) => {
 
 exports.uploadProfilePhoto = async (req, res) => {
   try {
-    const { profilePhotoUrl } = req.body;
-
-    if (!profilePhotoUrl) {
+    if (!req.file) {
       return res.status(400).json({
         success: false,
-        message: "Profile photo URL is required",
+        message: "Profile photo file is required",
       });
     }
+
+    const result = await cloudinary.uploader.upload(req.file.path, {
+      folder: "riders/profile_photos",
+      transformation: [
+        {
+          width: 500,
+          height: 500,
+          crop: "limit",
+        },
+      ],
+    });
+
+    const profilePhotoUrl = result.secure_url;
+
+    cleanupTempFile(req.file.path);
 
     await Rider.findOneAndUpdate(
       { user: req.user._id },
@@ -271,8 +388,6 @@ exports.uploadProfilePhoto = async (req, res) => {
       {
         $set: {
           profileImage: profilePhotoUrl,
-          "profileImageDetails.url": profilePhotoUrl,
-          "profileImageDetails.uploadedAt": new Date(),
         },
       },
       { new: true },
@@ -306,7 +421,6 @@ exports.acceptTerms = async (req, res) => {
       });
     }
 
-    // Update Rider model
     await Rider.findOneAndUpdate(
       { user: req.user._id },
       {
@@ -319,7 +433,6 @@ exports.acceptTerms = async (req, res) => {
       { new: true, upsert: true },
     );
 
-    // Get complete onboarding data
     const onboardingData = await getOnboardingData(req.user._id);
 
     res.status(200).json({
@@ -343,15 +456,16 @@ exports.submitForVerification = async (req, res) => {
 
     const missingFields = [];
 
-    if (!rider.vehicleDetails.licensePlate)
+    if (!rider.vehicleDetails?.licensePlate)
       missingFields.push("Vehicle License Plate");
-    if (!rider.vehicleDetails.make) missingFields.push("Vehicle Make");
-    if (!rider.vehicleDetails.model) missingFields.push("Vehicle Model");
-    if (!rider.documents.license.licenseNumber)
+    if (!rider.vehicleDetails?.make) missingFields.push("Vehicle Make");
+    if (!rider.vehicleDetails?.model) missingFields.push("Vehicle Model");
+    if (!rider.documents?.license?.licenseNumber)
       missingFields.push("Driver's License");
-    if (!rider.documents.insurance.documentUrl)
+    if (!rider.documents?.insurance?.documentUrl)
       missingFields.push("Insurance Document");
-    if (!rider.documents.profilePhoto.url) missingFields.push("Profile Photo");
+    if (!rider.documents?.profilePhoto?.url)
+      missingFields.push("Profile Photo");
     if (!rider.termsAccepted)
       missingFields.push("Terms & Conditions Acceptance");
 
@@ -410,6 +524,7 @@ exports.getOnboardingStatus = async (req, res) => {
     });
   }
 };
+
 exports.updateRiderProfile = async (req, res) => {
   try {
     const {
@@ -434,7 +549,6 @@ exports.updateRiderProfile = async (req, res) => {
     if (city) updateData.city = city;
     if (emergencyContact) updateData.emergencyContact = emergencyContact;
 
-    // FIX: Change licensePlate to vehicleNumber
     if (make || model || year || color || vehicleNumber || vehicleType) {
       updateData.vehicleDetails = {
         make: make || "",
@@ -452,12 +566,11 @@ exports.updateRiderProfile = async (req, res) => {
       { new: true, upsert: true },
     );
 
-    if (req.body.name || req.body.email) {
+    if (req.body.name || req.body.email || req.body.phoneNumber) {
       const userUpdate = {};
       if (req.body.name) userUpdate.name = req.body.name;
       if (req.body.email) userUpdate.email = req.body.email;
-      // FIX: Use phoneNumber from req.body, not from destructured
-      if (req.body.phoneNumber) userUpdate.phone = req.body.phoneNumber;
+      if (req.body.phoneNumber) userUpdate.phoneNumber = req.body.phoneNumber;
 
       await User.findByIdAndUpdate(req.user._id, { $set: userUpdate });
     }
@@ -515,10 +628,13 @@ exports.approveRider = async (req, res) => {
       });
     }
 
-    rider.documents.license.status = "approved";
-    rider.documents.insurance.status = "approved";
-    rider.documents.profilePhoto.status = "approved";
-    if (rider.documents.vehicleRegistration) {
+    // Update document statuses
+    if (rider.documents?.license) rider.documents.license.status = "approved";
+    if (rider.documents?.insurance)
+      rider.documents.insurance.status = "approved";
+    if (rider.documents?.profilePhoto)
+      rider.documents.profilePhoto.status = "approved";
+    if (rider.documents?.vehicleRegistration) {
       rider.documents.vehicleRegistration.status = "approved";
     }
 
@@ -527,7 +643,7 @@ exports.approveRider = async (req, res) => {
     rider.status = "active";
     rider.verifiedAt = new Date();
     rider.updatedAt = new Date();
-    rider.adminNotes = adminNotes;
+    if (adminNotes) rider.adminNotes = adminNotes;
 
     await rider.save();
 
@@ -562,18 +678,24 @@ exports.rejectRider = async (req, res) => {
       });
     }
 
-    if (rejectedDocument) {
+    if (rejectedDocument && rider.documents) {
       switch (rejectedDocument) {
         case "license":
-          rider.documents.license.status = "rejected";
-          rider.documents.license.rejectionReason = rejectionReason;
+          if (rider.documents.license) {
+            rider.documents.license.status = "rejected";
+            rider.documents.license.rejectionReason = rejectionReason;
+          }
           break;
         case "insurance":
-          rider.documents.insurance.status = "rejected";
-          rider.documents.insurance.rejectionReason = rejectionReason;
+          if (rider.documents.insurance) {
+            rider.documents.insurance.status = "rejected";
+            rider.documents.insurance.rejectionReason = rejectionReason;
+          }
           break;
         case "profilePhoto":
-          rider.documents.profilePhoto.status = "rejected";
+          if (rider.documents.profilePhoto) {
+            rider.documents.profilePhoto.status = "rejected";
+          }
           break;
         default:
           break;
@@ -603,3 +725,5 @@ exports.rejectRider = async (req, res) => {
     });
   }
 };
+
+exports.upload = upload;
