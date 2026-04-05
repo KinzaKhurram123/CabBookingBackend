@@ -77,7 +77,15 @@ exports.adminLogin = async (req, res) => {
 
 exports.createAdmin = async (req, res) => {
   try {
-    const { name, email, password, phoneNumber, role, permissions } = req.body;
+    const {
+      name,
+      email,
+      password,
+      phoneNumber,
+      role,
+      permissions,
+      isFirstAdmin,
+    } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -86,44 +94,45 @@ exports.createAdmin = async (req, res) => {
       });
     }
 
-    const existingAdmin = await Admin.findOne({ email });
-    if (existingAdmin) {
-      return res.status(400).json({
-        success: false,
-        message: "Admin with this email already exists",
+    const adminCount = await Admin.countDocuments();
+
+    if (adminCount === 0 && isFirstAdmin === true) {
+      console.log("Creating first admin (no authentication required)");
+
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const newAdmin = await Admin.create({
+        name,
+        email,
+        password: hashedPassword,
+        phoneNumber,
+        role: "super_admin",
+        permissions: {
+          manageRiders: true,
+          manageDrivers: true,
+          manageUsers: true,
+          managePayments: true,
+          viewReports: true,
+        },
+        isActive: true,
+      });
+
+      const token = generateToken(newAdmin._id);
+
+      return res.status(201).json({
+        success: true,
+        message: "Super admin created successfully",
+        data: {
+          admin: {
+            _id: newAdmin._id,
+            name: newAdmin.name,
+            email: newAdmin.email,
+            role: newAdmin.role,
+          },
+          token,
+        },
       });
     }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const newAdmin = await Admin.create({
-      name,
-      email,
-      password: hashedPassword,
-      phoneNumber,
-      role: role || "admin",
-      permissions: permissions || {
-        manageRiders: true,
-        manageDrivers: true,
-        manageUsers: true,
-        managePayments: true,
-        viewReports: true,
-      },
-      isActive: true,
-    });
-
-    res.status(201).json({
-      success: true,
-      message: "Admin created successfully",
-      data: {
-        _id: newAdmin._id,
-        name: newAdmin.name,
-        email: newAdmin.email,
-        role: newAdmin.role,
-        permissions: newAdmin.permissions,
-        isActive: newAdmin.isActive,
-      },
-    });
   } catch (error) {
     console.error("Create admin error:", error);
     res.status(500).json({
@@ -435,6 +444,150 @@ exports.getDashboardStats = async (req, res) => {
     });
   } catch (error) {
     console.error("Get dashboard stats error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.approveRider = async (req, res) => {
+  try {
+    const { riderId } = req.params;
+    const { adminNotes } = req.body;
+
+    const rider = await Rider.findById(riderId);
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found",
+      });
+    }
+
+    if (rider.documents?.license) rider.documents.license.status = "approved";
+    if (rider.documents?.insurance)
+      rider.documents.insurance.status = "approved";
+    if (rider.documents?.profilePhoto)
+      rider.documents.profilePhoto.status = "approved";
+    if (rider.documents?.vehicleRegistration) {
+      rider.documents.vehicleRegistration.status = "approved";
+    }
+
+    rider.isVerified = true;
+    rider.verificationStatus = "approved";
+    rider.status = "available";
+    rider.verifiedAt = new Date();
+    rider.updatedAt = new Date();
+    if (adminNotes) rider.adminNotes = adminNotes;
+
+    await rider.save();
+
+    // Update user profile image if profile photo exists
+    if (rider.documents?.profilePhoto?.url) {
+      await User.findByIdAndUpdate(rider.user, {
+        profileImage: rider.documents.profilePhoto.url,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Rider approved successfully. They can now start driving.",
+      data: rider,
+    });
+  } catch (error) {
+    console.error("Approve rider error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.rejectRider = async (req, res) => {
+  try {
+    const { riderId } = req.params;
+    const { rejectionReason, rejectedDocument } = req.body;
+
+    const rider = await Rider.findById(riderId);
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider not found",
+      });
+    }
+
+    if (rejectedDocument && rider.documents) {
+      switch (rejectedDocument) {
+        case "license":
+          if (rider.documents.license) {
+            rider.documents.license.status = "rejected";
+            rider.documents.license.rejectionReason = rejectionReason;
+          }
+          break;
+        case "insurance":
+          if (rider.documents.insurance) {
+            rider.documents.insurance.status = "rejected";
+            rider.documents.insurance.rejectionReason = rejectionReason;
+          }
+          break;
+        case "profilePhoto":
+          if (rider.documents.profilePhoto) {
+            rider.documents.profilePhoto.status = "rejected";
+          }
+          break;
+        case "vehicleRegistration":
+          if (rider.documents.vehicleRegistration) {
+            rider.documents.vehicleRegistration.status = "rejected";
+            rider.documents.vehicleRegistration.rejectionReason =
+              rejectionReason;
+          }
+          break;
+        default:
+          break;
+      }
+    }
+
+    rider.isVerified = false;
+    rider.verificationStatus = "rejected";
+    rider.status = "inactive";
+    rider.rejectionReason = rejectionReason;
+    rider.updatedAt = new Date();
+
+    await rider.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Rider rejected. They need to resubmit documents.",
+      data: rider,
+    });
+  } catch (error) {
+    console.error("Reject rider error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getPendingVerifications = async (req, res) => {
+  try {
+    const pendingRiders = await Rider.find({
+      verificationStatus: "in_review",
+      isVerified: false,
+    }).populate("user", "name email phoneNumber profileImage");
+
+    res.status(200).json({
+      success: true,
+      count: pendingRiders.length,
+      data: pendingRiders,
+    });
+  } catch (error) {
+    console.error("Get pending verifications error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",

@@ -3,6 +3,7 @@ const User = require("../models/user");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const { default: mongoose } = require("mongoose");
 const cloudinary = require("cloudinary").v2;
 
 cloudinary.config({
@@ -29,7 +30,7 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
-  const allowedTypes = /jpeg|jpg|png|gif/;
+  const allowedTypes = /jpeg|jpg|png|gif|pdf|doc|docx/;
   const extname = allowedTypes.test(
     path.extname(file.originalname).toLowerCase(),
   );
@@ -42,7 +43,7 @@ const fileFilter = (req, file, cb) => {
 
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter,
 });
 
@@ -57,114 +58,266 @@ const cleanupTempFile = (filePath) => {
   }
 };
 
-const getOnboardingData = async (userId) => {
-  const rider = await Rider.findOne({ user: userId }).populate(
-    "user",
-    "-password",
+const calculateOnboardingSteps = (rider) => {
+  const vehicle = rider.vehicleDetails || {};
+  const isVehicleComplete = !!(
+    vehicle.category &&
+    vehicle.vehicleType &&
+    vehicle.make &&
+    vehicle.model &&
+    vehicle.year &&
+    vehicle.licensePlate
   );
 
-  if (!rider) return null;
+  const license = rider.documents?.license || {};
+  const isLicenseComplete = !!(
+    license.licenseNumber &&
+    license.expiryDate &&
+    license.frontImage &&
+    license.backImage
+  );
+
+  const insurance = rider.documents?.insurance || {};
+  const isInsuranceComplete = !!(
+    insurance.provider &&
+    insurance.policyNumber &&
+    insurance.expiryDate &&
+    insurance.documentUrl
+  );
+
+  const profilePhoto = rider.documents?.profilePhoto || {};
+  const isProfilePhotoComplete = !!profilePhoto.url;
 
   return {
-    user: {
-      _id: rider.user._id,
-      name: rider.user.name,
-      email: rider.user.email,
-      phoneNumber: rider.user.phoneNumber,
-      role: rider.user.role,
-      profileImage: rider.user.profileImage || null,
-      country: rider.user.country,
-      city: rider.user.city,
-      createdAt: rider.user.createdAt,
-      updatedAt: rider.user.updatedAt,
-    },
-    riderDetails: {
-      _id: rider._id,
-      isVerified: rider.isVerified,
-      verificationStatus: rider.verificationStatus,
-      status: rider.status,
-      rejectionReason: rider.rejectionReason,
-      verifiedAt: rider.verifiedAt,
-      totalRides: rider.totalRides,
-      totalEarning: rider.totalEarning,
-      rating: rider.rating,
-      termsAccepted: rider.termsAccepted,
-      termsAcceptedAt: rider.termsAcceptedAt,
-      location: rider.location,
-      address: rider.address,
-      city: rider.city,
-      emergencyContact: rider.emergencyContact,
-    },
-    vehicleDetails: {
-      category: rider.vehicleDetails?.category || null,
-      vehicleType: rider.vehicleDetails?.vehicleType || null,
-      make: rider.vehicleDetails?.make || null,
-      model: rider.vehicleDetails?.model || null,
-      year: rider.vehicleDetails?.year || null,
-      color: rider.vehicleDetails?.color || null,
-      licensePlate: rider.vehicleDetails?.licensePlate || null,
-      vehicleNumber: rider.vehicleDetails?.vehicleNumber || null,
-    },
-    documents: {
-      license: {
-        licenseNumber: rider.documents?.license?.licenseNumber || null,
-        expiryDate: rider.documents?.license?.expiryDate || null,
-        frontImage: rider.documents?.license?.frontImage || null,
-        backImage: rider.documents?.license?.backImage || null,
-        status: rider.documents?.license?.status || "pending",
-        rejectionReason: rider.documents?.license?.rejectionReason || null,
-        uploadedAt: rider.documents?.license?.uploadedAt || null,
-      },
-      insurance: {
-        provider: rider.documents?.insurance?.provider || null,
-        policyNumber: rider.documents?.insurance?.policyNumber || null,
-        expiryDate: rider.documents?.insurance?.expiryDate || null,
-        documentUrl: rider.documents?.insurance?.documentUrl || null,
-        status: rider.documents?.insurance?.status || "pending",
-        rejectionReason: rider.documents?.insurance?.rejectionReason || null,
-        uploadedAt: rider.documents?.insurance?.uploadedAt || null,
-      },
-      profilePhoto: {
-        url:
-          rider.documents?.profilePhoto?.url ||
-          rider.user?.profileImage ||
-          null,
-        status: rider.documents?.profilePhoto?.status || "pending",
-        uploadedAt: rider.documents?.profilePhoto?.uploadedAt || null,
-      },
-      vehicleRegistration: {
-        documentUrl: rider.documents?.vehicleRegistration?.documentUrl || null,
-        registrationNumber:
-          rider.documents?.vehicleRegistration?.registrationNumber || null,
-        status: rider.documents?.vehicleRegistration?.status || "pending",
-        uploadedAt: rider.documents?.vehicleRegistration?.uploadedAt || null,
-      },
-    },
-    onboardingSteps: {
-      vehicleDetails: !!(
-        rider.vehicleDetails?.licensePlate &&
-        rider.vehicleDetails?.make &&
-        rider.vehicleDetails?.model
-      ),
-      license: !!rider.documents?.license?.licenseNumber,
-      insurance: !!rider.documents?.insurance?.documentUrl,
-      profilePhoto: !!(
-        rider.documents?.profilePhoto?.url || rider.user?.profileImage
-      ),
-      termsAccepted: rider.termsAccepted || false,
-    },
-    onboardingRequired: !(
-      rider.vehicleDetails?.licensePlate &&
-      rider.vehicleDetails?.make &&
-      rider.vehicleDetails?.model &&
-      rider.documents?.license?.licenseNumber &&
-      rider.documents?.insurance?.documentUrl &&
-      (rider.documents?.profilePhoto?.url || rider.user?.profileImage) &&
-      rider.termsAccepted
-    ),
-    notificationMessage:
-      "As soon as your account is verified, we will send you a notification.",
+    vehicleDetails: isVehicleComplete,
+    license: isLicenseComplete,
+    insurance: isInsuranceComplete,
+    profilePhoto: isProfilePhotoComplete,
+    termsAccepted: rider.termsAccepted || false,
   };
+};
+
+const getOnboardingData = async (userId) => {
+  try {
+    const user = await User.findById(userId).select("-password");
+    const rider = await Rider.findOne({ user: userId });
+
+    if (!user || !rider) {
+      return null;
+    }
+
+    const onboardingSteps = calculateOnboardingSteps(rider);
+
+    const onboardingRequired = !(
+      onboardingSteps.vehicleDetails &&
+      onboardingSteps.license &&
+      onboardingSteps.insurance &&
+      onboardingSteps.profilePhoto &&
+      onboardingSteps.termsAccepted
+    );
+
+    return {
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        role: user.role,
+        profileImage: user.profileImage,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
+      riderDetails: {
+        _id: rider._id,
+        isVerified: rider.isVerified || false,
+        verificationStatus: rider.verificationStatus || "pending",
+        status: rider.status || "offline",
+        rejectionReason: rider.rejectionReason || null,
+        verifiedAt: rider.verifiedAt || null,
+        totalRides: rider.totalRides || 0,
+        totalEarning: rider.totalEarning || 0,
+        rating: rider.rating || 5,
+        termsAccepted: rider.termsAccepted || false,
+        termsAcceptedAt: rider.termsAcceptedAt || null,
+        location: rider.location || { type: "Point", coordinates: [0, 0] },
+        address: rider.address || null,
+        city: rider.city || null,
+        emergencyContact: rider.emergencyContact || {
+          name: null,
+          phone: null,
+          relation: null,
+        },
+      },
+      vehicleDetails: {
+        category: rider.vehicleDetails?.category || null,
+        vehicleType: rider.vehicleDetails?.vehicleType || null,
+        make: rider.vehicleDetails?.make || null,
+        model: rider.vehicleDetails?.model || null,
+        year: rider.vehicleDetails?.year || null,
+        color: rider.vehicleDetails?.color || null,
+        licensePlate: rider.vehicleDetails?.licensePlate || null,
+        vehicleNumber: rider.vehicleDetails?.vehicleNumber || null,
+      },
+      documents: {
+        license: {
+          licenseNumber: rider.documents?.license?.licenseNumber || null,
+          expiryDate: rider.documents?.license?.expiryDate || null,
+          frontImage: rider.documents?.license?.frontImage || null,
+          backImage: rider.documents?.license?.backImage || null,
+          status: rider.documents?.license?.status || "pending",
+          rejectionReason: rider.documents?.license?.rejectionReason || null,
+          uploadedAt: rider.documents?.license?.uploadedAt || null,
+        },
+        insurance: {
+          provider: rider.documents?.insurance?.provider || null,
+          policyNumber: rider.documents?.insurance?.policyNumber || null,
+          expiryDate: rider.documents?.insurance?.expiryDate || null,
+          documentUrl: rider.documents?.insurance?.documentUrl || null,
+          status: rider.documents?.insurance?.status || "pending",
+          rejectionReason: rider.documents?.insurance?.rejectionReason || null,
+          uploadedAt: rider.documents?.insurance?.uploadedAt || null,
+        },
+        profilePhoto: {
+          url: rider.documents?.profilePhoto?.url || null,
+          status: rider.documents?.profilePhoto?.status || "pending",
+          uploadedAt: rider.documents?.profilePhoto?.uploadedAt || null,
+        },
+        vehicleRegistration: {
+          documentUrl:
+            rider.documents?.vehicleRegistration?.documentUrl || null,
+          registrationNumber:
+            rider.documents?.vehicleRegistration?.registrationNumber || null,
+          status: rider.documents?.vehicleRegistration?.status || "pending",
+          uploadedAt: rider.documents?.vehicleRegistration?.uploadedAt || null,
+        },
+      },
+      onboardingSteps: onboardingSteps,
+      onboardingRequired: onboardingRequired,
+      notificationMessage:
+        "As soon as your account is verified, we will send you a notification.",
+    };
+  } catch (error) {
+    console.error("Error in getOnboardingData:", error);
+    throw error;
+  }
+};
+
+exports.addCompleteVehicleDetails = async (req, res) => {
+  try {
+    console.log("=== ADD COMPLETE VEHICLE DETAILS ===");
+    console.log("req.files:", req.files);
+    console.log("req.body:", req.body);
+
+    const {
+      category,
+      subcategoryId,
+      subcategoryName,
+      make,
+      model,
+      year,
+      color,
+      licensePlate,
+      vehicleNumber,
+      registrationNumber,
+    } = req.body;
+
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
+    let rider = await Rider.findOne({ user: userId });
+
+    if (!rider) {
+      rider = new Rider({
+        user: userId,
+        status: "offline",
+        documents: {},
+      });
+    }
+
+    if (!rider.vehicleDetails) {
+      rider.vehicleDetails = {};
+    }
+
+    // Save Category & Subcategory
+    if (category) {
+      rider.vehicleDetails.category = category;
+    }
+
+    if (subcategoryId || subcategoryName) {
+      rider.vehicleDetails.subcategory = {
+        id: subcategoryId || null,
+        name: subcategoryName || null,
+      };
+      rider.vehicleDetails.vehicleType = subcategoryName;
+    }
+
+    // Save Vehicle Details
+    const finalLicensePlate = licensePlate || vehicleNumber;
+    if (make) rider.vehicleDetails.make = make;
+    if (model) rider.vehicleDetails.model = model;
+    if (year) rider.vehicleDetails.year = year;
+    if (color) rider.vehicleDetails.color = color;
+    if (finalLicensePlate)
+      rider.vehicleDetails.licensePlate = finalLicensePlate;
+
+    // Upload Vehicle Photo
+    if (req.files?.vehiclePhoto && req.files.vehiclePhoto[0]) {
+      const result = await cloudinary.uploader.upload(
+        req.files.vehiclePhoto[0].path,
+        {
+          folder: "riders/vehicle_photos",
+        },
+      );
+      cleanupTempFile(req.files.vehiclePhoto[0].path);
+      rider.vehicleDetails.photo = result.secure_url;
+    }
+
+    // Upload Registration Document
+    if (
+      req.files?.registrationDocument &&
+      req.files.registrationDocument[0] &&
+      registrationNumber
+    ) {
+      const result = await cloudinary.uploader.upload(
+        req.files.registrationDocument[0].path,
+        {
+          folder: "riders/vehicle_registration",
+        },
+      );
+      cleanupTempFile(req.files.registrationDocument[0].path);
+
+      if (!rider.documents) rider.documents = {};
+      rider.documents.vehicleRegistration = {
+        registrationNumber: registrationNumber,
+        documentUrl: result.secure_url,
+        status: "pending",
+        uploadedAt: new Date(),
+      };
+    }
+
+    rider.updatedAt = new Date();
+    await rider.save();
+
+    const onboardingData = await getOnboardingData(userId);
+
+    res.status(200).json({
+      success: true,
+      message: "Vehicle details saved successfully",
+      data: onboardingData,
+    });
+  } catch (error) {
+    console.error("Add vehicle details error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while adding vehicle details",
+      error: error.message,
+    });
+  }
 };
 
 exports.addVehicleDetails = async (req, res) => {
@@ -180,25 +333,35 @@ exports.addVehicleDetails = async (req, res) => {
       vehicleNumber,
     } = req.body;
 
-    await Rider.findOneAndUpdate(
-      { user: req.user._id },
-      {
-        $set: {
-          "vehicleDetails.category": category,
-          "vehicleDetails.vehicleType": vehicleType,
-          "vehicleDetails.make": make,
-          "vehicleDetails.model": model,
-          "vehicleDetails.year": year,
-          "vehicleDetails.color": color,
-          "vehicleDetails.licensePlate": licensePlate,
-          "vehicleDetails.vehicleNumber": vehicleNumber,
-          updatedAt: new Date(),
-        },
-      },
-      { new: true, upsert: true },
-    );
+    const userId = req.user?._id || req.user?.id;
 
-    const onboardingData = await getOnboardingData(req.user._id);
+    let rider = await Rider.findOne({ user: userId });
+
+    if (!rider) {
+      rider = new Rider({
+        user: userId,
+        status: "offline",
+        documents: {},
+      });
+    }
+
+    if (!rider.vehicleDetails) {
+      rider.vehicleDetails = {};
+    }
+
+    if (category) rider.vehicleDetails.category = category;
+    if (vehicleType) rider.vehicleDetails.vehicleType = vehicleType;
+    if (make) rider.vehicleDetails.make = make;
+    if (model) rider.vehicleDetails.model = model;
+    if (year) rider.vehicleDetails.year = year;
+    if (color) rider.vehicleDetails.color = color;
+    if (licensePlate) rider.vehicleDetails.licensePlate = licensePlate;
+    if (vehicleNumber) rider.vehicleDetails.vehicleNumber = vehicleNumber;
+
+    rider.updatedAt = new Date();
+    await rider.save();
+
+    const onboardingData = await getOnboardingData(userId);
 
     res.status(200).json({
       success: true,
@@ -218,9 +381,17 @@ exports.addVehicleDetails = async (req, res) => {
 exports.uploadLicense = async (req, res) => {
   try {
     const { licenseNumber, expiryDate } = req.body;
+    console.log("=== UPLOAD LICENSE START ===");
 
     const front = req.files?.frontImage?.[0];
     const back = req.files?.backImage?.[0];
+
+    if (front?.size > 5 * 1024 * 1024 || back?.size > 5 * 1024 * 1024) {
+      return res.status(400).json({
+        success: false,
+        message: "Each file should be less than 5MB",
+      });
+    }
 
     if (!front || !back) {
       return res.status(400).json({
@@ -236,6 +407,15 @@ exports.uploadLicense = async (req, res) => {
       });
     }
 
+    const userId = req.user._id || req.user.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+      });
+    }
+
     const frontUpload = await cloudinary.uploader.upload(front.path, {
       folder: "riders/license/front",
     });
@@ -247,11 +427,13 @@ exports.uploadLicense = async (req, res) => {
     cleanupTempFile(front.path);
     cleanupTempFile(back.path);
 
-    await Rider.findOneAndUpdate(
-      { user: req.user._id },
-      {
-        $set: {
-          "documents.license": {
+    let rider = await Rider.findOne({ user: userId });
+
+    if (!rider) {
+      rider = new Rider({
+        user: userId,
+        documents: {
+          license: {
             licenseNumber,
             expiryDate: new Date(expiryDate),
             frontImage: frontUpload.secure_url,
@@ -259,17 +441,31 @@ exports.uploadLicense = async (req, res) => {
             status: "pending",
             uploadedAt: new Date(),
           },
-          updatedAt: new Date(),
         },
-      },
-      { new: true, upsert: true },
-    );
+      });
+    } else {
+      if (!rider.documents) {
+        rider.documents = {};
+      }
 
-    const onboardingData = await getOnboardingData(req.user._id);
+      rider.documents.license = {
+        licenseNumber,
+        expiryDate: new Date(expiryDate),
+        frontImage: frontUpload.secure_url,
+        backImage: backUpload.secure_url,
+        status: "pending",
+        uploadedAt: new Date(),
+      };
+    }
+
+    rider.updatedAt = new Date();
+    await rider.save();
+
+    const onboardingData = await getOnboardingData(userId);
 
     res.status(200).json({
       success: true,
-      message: "License uploaded successfully. Awaiting verification.",
+      message: "License uploaded successfully",
       data: onboardingData,
     });
   } catch (error) {
@@ -284,6 +480,11 @@ exports.uploadLicense = async (req, res) => {
 
 exports.uploadInsurance = async (req, res) => {
   try {
+    console.log("=== UPLOAD INSURANCE DEBUG ===");
+    console.log("req.user:", req.user);
+    console.log("req.file:", req.file);
+    console.log("req.body:", req.body);
+
     const { provider, policyNumber, expiryDate } = req.body;
 
     if (!req.file) {
@@ -300,38 +501,65 @@ exports.uploadInsurance = async (req, res) => {
       });
     }
 
+    const userId = req.user?._id || req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required: user ID missing",
+      });
+    }
+
     const result = await cloudinary.uploader.upload(req.file.path, {
       folder: "riders/insurance",
       resource_type: "auto",
     });
 
-    // Clean up temp file
     cleanupTempFile(req.file.path);
 
-    // Update database
-    await Rider.findOneAndUpdate(
-      { user: req.user._id },
-      {
-        $set: {
-          "documents.insurance": {
-            provider,
-            policyNumber,
-            expiryDate: new Date(expiryDate),
-            documentUrl: result.secure_url,
-            status: "pending",
-            uploadedAt: new Date(),
-          },
-          updatedAt: new Date(),
-        },
-      },
-      { new: true, upsert: true },
-    );
+    let rider = await Rider.findOne({ user: userId });
 
-    const onboardingData = await getOnboardingData(req.user._id);
+    if (!rider) {
+      rider = new Rider({
+        user: userId,
+        documents: {},
+      });
+    }
+
+    if (!rider.documents) {
+      rider.documents = {};
+    }
+
+    let parsedExpiryDate;
+    if (expiryDate.includes("-")) {
+      const parts = expiryDate.split("-");
+      if (parts[0].length === 4) {
+        parsedExpiryDate = new Date(expiryDate);
+      } else {
+        const [day, month, year] = parts;
+        parsedExpiryDate = new Date(`${year}-${month}-${day}`);
+      }
+    } else {
+      parsedExpiryDate = new Date(expiryDate);
+    }
+
+    rider.documents.insurance = {
+      provider,
+      policyNumber,
+      expiryDate: parsedExpiryDate,
+      documentUrl: result.secure_url,
+      status: "pending",
+      uploadedAt: new Date(),
+    };
+
+    rider.updatedAt = new Date();
+    await rider.save();
+
+    const onboardingData = await getOnboardingData(userId);
 
     res.status(200).json({
       success: true,
-      message: "Insurance uploaded successfully. Awaiting verification.",
+      message: "Insurance uploaded successfully",
       data: onboardingData,
     });
   } catch (error) {
@@ -346,58 +574,76 @@ exports.uploadInsurance = async (req, res) => {
 
 exports.uploadProfilePhoto = async (req, res) => {
   try {
-    if (!req.file) {
+    console.log("=== UPLOAD PROFILE PHOTO DEBUG ===");
+    console.log("Content-Type:", req.headers["content-type"]);
+    console.log("req.user:", req.user);
+    console.log("req.file:", req.file);
+    console.log("req.body:", req.body);
+
+    let file = req.file;
+
+    if (!file) {
       return res.status(400).json({
         success: false,
-        message: "Profile photo file is required",
+        message: "No file received. Please send file as 'profilePhoto' field",
       });
     }
 
-    const result = await cloudinary.uploader.upload(req.file.path, {
+    const userId = req.user?._id || req.user?.id;
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required: user ID missing",
+      });
+    }
+
+    const result = await cloudinary.uploader.upload(file.path, {
       folder: "riders/profile_photos",
-      transformation: [
-        {
-          width: 500,
-          height: 500,
-          crop: "limit",
-        },
-      ],
+      transformation: [{ width: 500, height: 500, crop: "limit" }],
     });
 
-    const profilePhotoUrl = result.secure_url;
+    cleanupTempFile(file.path);
 
-    cleanupTempFile(req.file.path);
+    let rider = await Rider.findOne({ user: userId });
 
-    await Rider.findOneAndUpdate(
-      { user: req.user._id },
-      {
-        $set: {
-          "documents.profilePhoto": {
-            url: profilePhotoUrl,
-            status: "pending",
-            uploadedAt: new Date(),
-          },
-          updatedAt: new Date(),
-        },
-      },
-      { new: true, upsert: true },
-    );
+    if (!rider) {
+      rider = new Rider({
+        user: userId,
+        documents: {},
+      });
+    }
 
-    await User.findByIdAndUpdate(
-      req.user._id,
-      {
-        $set: {
-          profileImage: profilePhotoUrl,
-        },
-      },
-      { new: true },
-    );
+    if (!rider.documents) {
+      rider.documents = {};
+    }
 
-    const onboardingData = await getOnboardingData(req.user._id);
+    const existingPhoto = rider.documents.profilePhoto;
+    const photoStatus =
+      existingPhoto?.status === "approved" ? "approved" : "pending";
+
+    rider.documents.profilePhoto = {
+      url: result.secure_url,
+      status: photoStatus,
+      uploadedAt: new Date(),
+    };
+
+    rider.updatedAt = new Date();
+    await rider.save();
+
+    if (photoStatus === "approved") {
+      await User.findByIdAndUpdate(userId, {
+        profileImage: result.secure_url,
+      });
+    }
+
+    const onboardingData = await getOnboardingData(userId);
 
     res.status(200).json({
       success: true,
-      message: "Profile photo uploaded successfully",
+      message:
+        photoStatus === "approved"
+          ? "Profile photo updated successfully"
+          : "Profile photo uploaded and pending admin approval",
       data: onboardingData,
     });
   } catch (error) {
@@ -421,8 +667,10 @@ exports.acceptTerms = async (req, res) => {
       });
     }
 
+    const userId = req.user?._id || req.user?.id;
+
     await Rider.findOneAndUpdate(
-      { user: req.user._id },
+      { user: userId },
       {
         $set: {
           termsAccepted: true,
@@ -433,7 +681,7 @@ exports.acceptTerms = async (req, res) => {
       { new: true, upsert: true },
     );
 
-    const onboardingData = await getOnboardingData(req.user._id);
+    const onboardingData = await getOnboardingData(userId);
 
     res.status(200).json({
       success: true,
@@ -452,21 +700,22 @@ exports.acceptTerms = async (req, res) => {
 
 exports.submitForVerification = async (req, res) => {
   try {
-    const rider = await Rider.findOne({ user: req.user._id });
+    const userId = req.user?._id || req.user?.id;
+    const rider = await Rider.findOne({ user: userId });
 
     const missingFields = [];
 
-    if (!rider.vehicleDetails?.licensePlate)
+    if (!rider?.vehicleDetails?.licensePlate)
       missingFields.push("Vehicle License Plate");
-    if (!rider.vehicleDetails?.make) missingFields.push("Vehicle Make");
-    if (!rider.vehicleDetails?.model) missingFields.push("Vehicle Model");
-    if (!rider.documents?.license?.licenseNumber)
+    if (!rider?.vehicleDetails?.make) missingFields.push("Vehicle Make");
+    if (!rider?.vehicleDetails?.model) missingFields.push("Vehicle Model");
+    if (!rider?.documents?.license?.licenseNumber)
       missingFields.push("Driver's License");
-    if (!rider.documents?.insurance?.documentUrl)
+    if (!rider?.documents?.insurance?.documentUrl)
       missingFields.push("Insurance Document");
-    if (!rider.documents?.profilePhoto?.url)
+    if (!rider?.documents?.profilePhoto?.url)
       missingFields.push("Profile Photo");
-    if (!rider.termsAccepted)
+    if (!rider?.termsAccepted)
       missingFields.push("Terms & Conditions Acceptance");
 
     if (missingFields.length > 0) {
@@ -482,19 +731,18 @@ exports.submitForVerification = async (req, res) => {
     rider.updatedAt = new Date();
     await rider.save();
 
-    const onboardingData = await getOnboardingData(req.user._id);
+    const onboardingData = await getOnboardingData(userId);
 
     res.status(200).json({
       success: true,
-      message:
-        "Profile submitted for verification. You'll receive a notification once verified.",
+      message: "Profile submitted for verification",
       data: onboardingData,
     });
   } catch (error) {
     console.error("Submit verification error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error while submitting for verification",
+      message: "Server error",
       error: error.message,
     });
   }
@@ -502,7 +750,8 @@ exports.submitForVerification = async (req, res) => {
 
 exports.getOnboardingStatus = async (req, res) => {
   try {
-    const onboardingData = await getOnboardingData(req.user._id);
+    const userId = req.user?._id || req.user?.id;
+    const onboardingData = await getOnboardingData(userId);
 
     if (!onboardingData) {
       return res.status(404).json({
@@ -525,8 +774,80 @@ exports.getOnboardingStatus = async (req, res) => {
   }
 };
 
+exports.updateLocation = async (req, res) => {
+  try {
+    const { lat, lng, address } = req.body;
+    const userId = req.user?._id || req.user?.id;
+
+    if (!lat || !lng) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude and longitude are required",
+      });
+    }
+
+    const rider = await Rider.findOneAndUpdate(
+      { user: userId },
+      {
+        $set: {
+          location: {
+            type: "Point",
+            coordinates: [parseFloat(lng), parseFloat(lat)],
+          },
+          address: address || null,
+          updatedAt: new Date(),
+        },
+      },
+      { new: true, upsert: true },
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Location updated successfully",
+      data: {
+        location: rider.location,
+        address: rider.address,
+      },
+    });
+  } catch (error) {
+    console.error("Update location error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while updating location",
+      error: error.message,
+    });
+  }
+};
+
+exports.getRiderProfile = async (req, res) => {
+  try {
+    const userId = req.user?._id || req.user?.id;
+    const onboardingData = await getOnboardingData(userId);
+
+    if (!onboardingData) {
+      return res.status(404).json({
+        success: false,
+        message: "Rider profile not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: onboardingData,
+    });
+  } catch (error) {
+    console.error("Get rider profile error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error while fetching profile",
+      error: error.message,
+    });
+  }
+};
+
 exports.updateRiderProfile = async (req, res) => {
   try {
+    const userId = req.user?._id || req.user?.id;
     const {
       phoneNumber,
       vehicleType,
@@ -561,7 +882,7 @@ exports.updateRiderProfile = async (req, res) => {
     }
 
     await Rider.findOneAndUpdate(
-      { user: req.user._id },
+      { user: userId },
       { $set: updateData },
       { new: true, upsert: true },
     );
@@ -572,10 +893,10 @@ exports.updateRiderProfile = async (req, res) => {
       if (req.body.email) userUpdate.email = req.body.email;
       if (req.body.phoneNumber) userUpdate.phoneNumber = req.body.phoneNumber;
 
-      await User.findByIdAndUpdate(req.user._id, { $set: userUpdate });
+      await User.findByIdAndUpdate(userId, { $set: userUpdate });
     }
 
-    const onboardingData = await getOnboardingData(req.user._id);
+    const onboardingData = await getOnboardingData(userId);
 
     res.status(200).json({
       success: true,
@@ -592,20 +913,40 @@ exports.updateRiderProfile = async (req, res) => {
   }
 };
 
-exports.getPendingVerifications = async (req, res) => {
+exports.updateRiderStatus = async (req, res) => {
   try {
-    const pendingRiders = await Rider.find({
-      verificationStatus: "in_review",
-      isVerified: false,
-    }).populate("user", "name email phoneNumber profileImage");
+    const { status } = req.body;
+    const rider = req.rider;
+
+    const validStatuses = ["available", "offline"];
+    if (!status || !validStatuses.includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid status. Use 'available' or 'offline'",
+      });
+    }
+
+    if (status === "available" && rider.verificationStatus !== "approved") {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Your account is not verified yet. Please complete verification first.",
+      });
+    }
+
+    rider.status = status;
+    await rider.save();
 
     res.status(200).json({
       success: true,
-      count: pendingRiders.length,
-      data: pendingRiders,
+      message: `You are now ${status === "available" ? "Online" : "Offline"}`,
+      data: {
+        _id: rider._id,
+        status: rider.status,
+      },
     });
   } catch (error) {
-    console.error("Get pending verifications error:", error);
+    console.error("Update rider status error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
@@ -614,113 +955,37 @@ exports.getPendingVerifications = async (req, res) => {
   }
 };
 
-exports.approveRider = async (req, res) => {
+exports.debugDatabase = async (req, res) => {
   try {
-    const { riderId } = req.params;
-    const { adminNotes } = req.body;
-
-    const rider = await Rider.findById(riderId);
-
-    if (!rider) {
-      return res.status(404).json({
-        success: false,
-        message: "Rider not found",
-      });
-    }
-
-    // Update document statuses
-    if (rider.documents?.license) rider.documents.license.status = "approved";
-    if (rider.documents?.insurance)
-      rider.documents.insurance.status = "approved";
-    if (rider.documents?.profilePhoto)
-      rider.documents.profilePhoto.status = "approved";
-    if (rider.documents?.vehicleRegistration) {
-      rider.documents.vehicleRegistration.status = "approved";
-    }
-
-    rider.isVerified = true;
-    rider.verificationStatus = "approved";
-    rider.status = "active";
-    rider.verifiedAt = new Date();
-    rider.updatedAt = new Date();
-    if (adminNotes) rider.adminNotes = adminNotes;
-
-    await rider.save();
-
-    const onboardingData = await getOnboardingData(rider.user);
+    const userId = req.user?._id || req.user?.id;
+    const rider = await Rider.findOne({ user: userId });
 
     res.status(200).json({
       success: true,
-      message: "Rider approved successfully. They can now start driving.",
-      data: onboardingData,
+      userId: userId,
+      riderExists: !!rider,
+      riderData: rider
+        ? {
+            _id: rider._id,
+            vehicleDetails: rider.vehicleDetails,
+            documents: {
+              license: rider.documents?.license,
+              insurance: rider.documents?.insurance,
+              profilePhoto: rider.documents?.profilePhoto,
+              vehicleRegistration: rider.documents?.vehicleRegistration,
+            },
+            termsAccepted: rider.termsAccepted,
+            status: rider.status,
+            verificationStatus: rider.verificationStatus,
+          }
+        : null,
+      userData: {
+        profileImage: req.user?.profileImage,
+      },
     });
   } catch (error) {
-    console.error("Approve rider error:", error);
     res.status(500).json({
       success: false,
-      message: "Server error",
-      error: error.message,
-    });
-  }
-};
-
-exports.rejectRider = async (req, res) => {
-  try {
-    const { riderId } = req.params;
-    const { rejectionReason, rejectedDocument } = req.body;
-
-    const rider = await Rider.findById(riderId);
-
-    if (!rider) {
-      return res.status(404).json({
-        success: false,
-        message: "Rider not found",
-      });
-    }
-
-    if (rejectedDocument && rider.documents) {
-      switch (rejectedDocument) {
-        case "license":
-          if (rider.documents.license) {
-            rider.documents.license.status = "rejected";
-            rider.documents.license.rejectionReason = rejectionReason;
-          }
-          break;
-        case "insurance":
-          if (rider.documents.insurance) {
-            rider.documents.insurance.status = "rejected";
-            rider.documents.insurance.rejectionReason = rejectionReason;
-          }
-          break;
-        case "profilePhoto":
-          if (rider.documents.profilePhoto) {
-            rider.documents.profilePhoto.status = "rejected";
-          }
-          break;
-        default:
-          break;
-      }
-    }
-
-    rider.isVerified = false;
-    rider.verificationStatus = "rejected";
-    rider.status = "inactive";
-    rider.rejectionReason = rejectionReason;
-    rider.updatedAt = new Date();
-
-    await rider.save();
-    const onboardingData = await getOnboardingData(rider.user);
-
-    res.status(200).json({
-      success: false,
-      message: "Rider rejected. They need to resubmit documents.",
-      data: onboardingData,
-    });
-  } catch (error) {
-    console.error("Reject rider error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error",
       error: error.message,
     });
   }

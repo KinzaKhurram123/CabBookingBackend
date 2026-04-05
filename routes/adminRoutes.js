@@ -11,6 +11,9 @@ const {
   deleteAdmin,
   changePassword,
   getDashboardStats,
+  approveRider,
+  rejectRider,
+  getPendingVerifications,
 } = require("../controllers/adminController");
 const {
   protectAdmin,
@@ -40,6 +43,10 @@ router.get("/all", superAdminOnly, getAllAdmins);
 router.put("/permissions/:id", superAdminOnly, updateAdminPermissions);
 router.put("/toggle-status/:id", superAdminOnly, toggleAdminStatus);
 router.delete("/:id", superAdminOnly, deleteAdmin);
+
+router.put("/riders/approve/:riderId", checkPermission("manageRiders"), approveRider);
+router.put("/riders/reject/:riderId", checkPermission("manageRiders"), rejectRider);
+router.get("/riders/pending", checkPermission("manageRiders"), getPendingVerifications);
 
 router.get(
   "/users",

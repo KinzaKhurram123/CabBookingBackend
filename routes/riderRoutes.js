@@ -9,17 +9,12 @@ const {
   submitForVerification,
   getOnboardingStatus,
   updateRiderProfile,
-  getPendingVerifications,
-  approveRider,
-  rejectRider,
+  updateRiderStatus,
+  addCompleteVehicleDetails,
   upload,
 } = require("../controllers/riderController");
-const { protect, authorize } = require("../middleware/authMiddleware");
-const {
-  protectAdmin,
-  superAdminOnly,
-  checkPermission,
-} = require("../middleware/adminMiddleware");
+const { protect } = require("../middleware/authMiddleware");
+const { riderProtect } = require("../middleware/riderAuthMiddleware");
 
 router.use(protect);
 
@@ -42,6 +37,16 @@ router.post(
   uploadProfilePhoto,
 );
 
+router.post(
+  "/add-complete-vehicle-details",
+  protect,
+  upload.fields([
+    { name: "vehiclePhoto", maxCount: 1 },
+    { name: "registrationDocument", maxCount: 1 },
+  ]),
+  addCompleteVehicleDetails,
+);
+
 router.post("/accept-terms", acceptTerms);
 
 router.post("/submit-verification", submitForVerification);
@@ -50,25 +55,6 @@ router.get("/onboarding-status", getOnboardingStatus);
 
 router.put("/profile", updateRiderProfile);
 
-router.get(
-  "/admin/pending-verifications",
-  protectAdmin,
-  checkPermission("manageRiders"),
-  getPendingVerifications,
-);
-
-router.put(
-  "/admin/approve-rider/:riderId",
-  protectAdmin,
-  checkPermission("manageRiders"),
-  approveRider,
-);
-
-router.put(
-  "/admin/reject-rider/:riderId",
-  protectAdmin,
-  checkPermission("manageRiders"),
-  rejectRider,
-);
+router.put("/status", riderProtect, updateRiderStatus);
 
 module.exports = router;

@@ -16,6 +16,8 @@ const {
   startRide,
   completeRide,
   getRideStatus,
+  updateRiderStatus,
+  approveRider,
 } = require("../controllers/rideBookingController");
 const { protect, authorize } = require("../middleware/authMiddleware");
 const { riderProtect } = require("../middleware/riderAuthMiddleware");
@@ -45,11 +47,10 @@ router.put(
   adminCancelRideBooking,
 );
 router.get("/bookings/cancelled", getCancelledBookings);
-
 // router.put("/accept_ride/:bookingId", protect, authorize("driver"), acceptRide);
 
-router.put("/accept_ride/:bookingId", riderProtect, acceptRide);
-router.put("/:bookingId/on-the-way", protect, riderOnTheWay);
+router.post("/accept/:bookingId", protect, riderProtect, acceptRide);
+router.put("/:bookingId/on-the-way", protect, riderProtect, riderOnTheWay);
 router.put("/:bookingId/reached-pickup", protect, reachedPickup);
 router.put("/:bookingId/start", protect, startRide);
 router.put("/:bookingId/complete", protect, completeRide);

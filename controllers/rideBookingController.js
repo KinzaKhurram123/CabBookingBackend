@@ -247,11 +247,15 @@ exports.createRideBooking = async (req, res) => {
 
 exports.getNearbyRides = async (req, res) => {
   try {
+    console.log("req.query:", req.query);
+    console.log("req.body:", req.body);
+
     let { latitude, longitude, radius = 5 } = req.query;
 
     if (!latitude || !longitude) {
       return res.status(400).json({
         message: "latitude & longitude required",
+        debug: { query: req.query, body: req.body },
       });
     }
 
@@ -384,77 +388,147 @@ exports.getAllRides = async (req, res) => {
 exports.acceptRide = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
+
   try {
-    const { bookingId } = req.params;
+    console.log("=== ACCEPT RIDE API HIT ===");
+
+    const bookingId = req.params.bookingId || req.body.bookingId;
     const rider = req.rider;
 
-    console.log("Rider trying to accept ride:", rider);
+    console.log("Booking ID:", bookingId);
+    console.log("Rider object:", rider);
 
-    if (rider.status !== "available") {
-      return res
-        .status(400)
-        .json({ message: "You are not available to accept new rides" });
+    if (!rider) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(401).json({
+        success: false,
+        message: "Rider not authenticated. Please login again.",
+      });
+    }
+
+    console.log("Rider ID:", rider._id);
+    console.log("Rider User ID:", rider.user);
+    console.log("Rider Status:", rider.status);
+    console.log("Rider Verified:", rider.isVerified);
+
+    if (!bookingId) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Booking ID is required",
+      });
     }
 
     const booking = await RideBooking.findById(bookingId).session(session);
 
     if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    console.log("Booking found:", {
+      id: booking._id,
+      status: booking.status,
+      driver: booking.driver,
+      user: booking.user,
+    });
+
+    if (booking.user.toString() === rider.user.toString()) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "You cannot accept your own ride booking",
+      });
     }
 
     if (booking.status !== "pending") {
-      return res
-        .status(400)
-        .json({ message: "This ride is no longer available" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `This ride is no longer available. Current status: ${booking.status}`,
+      });
     }
 
     if (booking.driver) {
-      return res
-        .status(400)
-        .json({
-          message: "This ride has already been accepted by another driver",
-        });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "This ride has already been accepted by another driver.",
+      });
     }
 
-    const distance = calculateDistance(
-      rider.location.coordinates[1],
-      rider.location.coordinates[0],
-      booking.pickupLocation.coordinates[1],
-      booking.pickupLocation.coordinates[0],
-    );
-
-    if (distance > 5) {
-      return res
-        .status(400)
-        .json({ message: "You are too far from the pickup location" });
+    if (rider.status !== "available") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `You are not available to accept new rides. Current status: ${rider.status}`,
+      });
     }
 
-    booking.driver = rider._id;
+    if (!rider.isVerified) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(403).json({
+        success: false,
+        message:
+          "Your account is not verified yet. Please wait for admin approval.",
+        verificationStatus: rider.verificationStatus,
+      });
+    }
+
     booking.status = "accepted";
-    await booking.save();
+    booking.driver = rider._id;
+    booking.acceptedAt = new Date();
+    await booking.save({ session });
 
     rider.status = "busy";
     rider.currentRide = booking._id;
-    await rider.save();
-
-    // TODO: Create a notification for the user
+    await rider.save({ session });
 
     await session.commitTransaction();
     session.endSession();
 
+    const populatedBooking = await RideBooking.findById(booking._id)
+      .populate("user", "name email phoneNumber profileImage")
+      .populate({
+        path: "driver",
+        populate: { path: "user", select: "name email phoneNumber" },
+      });
+
     res.status(200).json({
       success: true,
       message: "Ride accepted successfully",
-      booking,
-      rider,
+      data: {
+        booking: populatedBooking,
+        rider: {
+          id: rider._id,
+          status: rider.status,
+          currentRide: rider.currentRide,
+        },
+      },
     });
   } catch (error) {
     await session.abortTransaction();
     session.endSession();
     console.error("Accept ride error:", error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
   }
 };
+
 exports.debugNearbyRides = async (req, res) => {
   try {
     const { latitude, longitude } = req.query;
@@ -884,169 +958,52 @@ exports.getUserRideHistory = async (req, res) => {
   }
 };
 
-// exports.acceptRide = async (req, res) => {
-//   try {
-//     const bookingId = req.params.bookingId || req.body.bookingId;
-//     const userId = req.user._id;
-
-//     console.log("=== ACCEPT RIDE DEBUG ===");
-//     console.log("Full URL params:", req.params);
-//     console.log("Booking ID from params:", req.params.bookingId);
-//     console.log("Booking ID from body:", req.body.bookingId);
-//     console.log("Final bookingId:", bookingId);
-//     console.log("Booking ID length:", bookingId?.length);
-//     console.log("User ID:", userId);
-//     console.log("========================");
-
-//     if (!bookingId) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Booking ID is required",
-//       });
-//     }
-
-//     const allBookings = await RideBooking.find({});
-//     console.log("Total bookings in DB:", allBookings.length);
-//     console.log(
-//       "All booking IDs in DB:",
-//       allBookings.map((b) => b._id.toString()),
-//     );
-
-//     const idExists = allBookings.some(
-//       (b) => b._id.toString() === bookingId.toString(),
-//     );
-//     console.log("ID exists in DB:", idExists);
-
-//     let booking;
-//     try {
-//       booking = await RideBooking.findById(bookingId);
-//       console.log("Booking found by findById:", booking ? "YES" : "NO");
-//     } catch (err) {
-//       console.log("Error in findById:", err.message);
-//     }
-
-//     if (!booking) {
-//       console.log("Trying manual search...");
-//       booking = await RideBooking.findOne({
-//         _id: bookingId,
-//       });
-//       console.log("Manual search result:", booking ? "FOUND" : "NOT FOUND");
-//     }
-
-//     if (!booking) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Booking not found",
-//         debug: {
-//           receivedId: bookingId,
-//           receivedIdType: typeof bookingId,
-//           receivedIdString: bookingId.toString(),
-//           totalBookingsInDB: allBookings.length,
-//           availableIds: allBookings.map((b) => b._id.toString()),
-//           suggestion: "Check if this ID matches any of the available IDs above",
-//         },
-//       });
-//     }
-
-//     console.log("Booking found:", booking._id, "Status:", booking.status);
-
-//     if (booking.status !== "pending") {
-//       return res.status(400).json({
-//         success: false,
-//         message: `This ride is no longer available. Current status: ${booking.status}`,
-//       });
-//     }
-
-//     const rider = await Rider.findOne({ userId: userId });
-
-//     if (!rider) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Rider not found for this user",
-//       });
-//     }
-
-//     if (rider.isAvailable === false) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "You are currently unavailable to accept rides",
-//       });
-//     }
-
-//     booking.status = "accepted";
-//     booking.driver = rider._id;
-//     booking.acceptedAt = new Date();
-
-//     if (!booking.statusHistory) booking.statusHistory = [];
-
-//     booking.statusHistory.push({
-//       status: "accepted",
-//       changedBy: rider._id,
-//       userRole: "driver",
-//       reason: "Ride accepted by rider",
-//       changedAt: new Date(),
-//     });
-
-//     await booking.save();
-
-//     const updatedBooking = await RideBooking.findById(booking._id)
-//       .populate({
-//         path: "user",
-//         select: "name email phoneNumber profileImage role",
-//       })
-//       .populate({
-//         path: "driver",
-//         populate: {
-//           path: "userId",
-//           select: "name email phoneNumber profileImage",
-//         },
-//       })
-//       .lean();
-
-//     const riderDetails = await Rider.findById(rider._id)
-//       .select("vehicleDetails rating totalRides location isAvailable")
-//       .lean();
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Ride accepted successfully",
-//       booking: {
-//         ...updatedBooking,
-//         riderInfo: {
-//           id: rider._id,
-//           name: req.user.name,
-//           phone: req.user.phoneNumber,
-//           email: req.user.email,
-//           profileImage: req.user.profileImage,
-//           vehicleDetails: riderDetails?.vehicleDetails || {},
-//           rating: riderDetails?.rating || 0,
-//           totalRides: riderDetails?.totalRides || 0,
-//           currentLocation: riderDetails?.location?.coordinates || null,
-//         },
-//       },
-//       estimatedPickupTime: calculateEstimatedArrival(
-//         booking.duration,
-//         new Date(),
-//       ),
-//       timestamp: new Date().toISOString(),
-//     });
-//   } catch (error) {
-//     console.error("Accept ride error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//       error: error.message,
-//     });
-//   }
-// };
-
 exports.riderOnTheWay = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const { currentLocation } = req.body;
-    const riderId = req.user._id;
+    let { currentLocation } = req.body;
+    const riderId = req.user?._id;
+
+    console.log("RiderId:", riderId, "Type:", typeof riderId);
+    if (!riderId) {
+      return res.status(401).json({
+        success: false,
+        message: "User not authenticated",
+      });
+    }
+
+    if (!currentLocation) {
+      return res.status(400).json({
+        success: false,
+        message: "currentLocation is required",
+      });
+    }
+
+    if (currentLocation.latitude && currentLocation.longitude) {
+      currentLocation = {
+        coordinates: [currentLocation.longitude, currentLocation.latitude],
+      };
+    }
+
+    if (
+      !currentLocation.coordinates ||
+      !Array.isArray(currentLocation.coordinates) ||
+      currentLocation.coordinates.length !== 2
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "currentLocation.coordinates array with [longitude, latitude] is required",
+      });
+    }
 
     const booking = await RideBooking.findById(bookingId);
+    console.log("Booking:", {
+      id: booking._id,
+      driver: booking.driver,
+      driverType: typeof booking.driver,
+      status: booking.status,
+    });
     if (!booking) {
       return res.status(404).json({
         success: false,
@@ -1054,7 +1011,14 @@ exports.riderOnTheWay = async (req, res) => {
       });
     }
 
-    if (!booking.driver || booking.driver.toString() !== riderId.toString()) {
+    if (!booking.driver) {
+      return res.status(403).json({
+        success: false,
+        message: "No driver assigned to this ride yet",
+      });
+    }
+
+    if (booking.driver.toString() !== riderId.toString()) {
       return res.status(403).json({
         success: false,
         message: "You are not assigned to this ride",
@@ -1071,14 +1035,12 @@ exports.riderOnTheWay = async (req, res) => {
     booking.status = "onTheWay";
     booking.onTheWayAt = new Date();
 
-    if (currentLocation && currentLocation.coordinates) {
-      await Rider.findByIdAndUpdate(riderId, {
-        location: {
-          type: "Point",
-          coordinates: currentLocation.coordinates,
-        },
-      });
-    }
+    await Rider.findByIdAndUpdate(riderId, {
+      location: {
+        type: "Point",
+        coordinates: currentLocation.coordinates,
+      },
+    });
 
     booking.statusHistory.push({
       status: "onTheWay",
@@ -1090,14 +1052,18 @@ exports.riderOnTheWay = async (req, res) => {
 
     await booking.save();
 
+    const rider = await Rider.findById(riderId);
     const riderLocation =
-      currentLocation?.coordinates ||
-      (await Rider.findById(riderId)).location?.coordinates;
-
+      rider?.location?.coordinates || currentLocation.coordinates;
     const pickupCoords = booking.pickupLocation.coordinates;
     let estimatedArrival = null;
 
-    if (riderLocation && pickupCoords) {
+    if (
+      riderLocation &&
+      pickupCoords &&
+      riderLocation.length === 2 &&
+      pickupCoords.length === 2
+    ) {
       const distanceToPickup = calculateDistance(
         riderLocation[1],
         riderLocation[0],
