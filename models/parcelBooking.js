@@ -17,11 +17,23 @@ const parcelBookingSchema = new mongoose.Schema(
     numberOfPackages: { type: Number, required: true },
     fragileItem: { type: Boolean, default: false },
     distance: { type: Number, required: true },
+    time: { type: String },
+    duration: { type: String },
     estimateTime: { type: String, required: true },
     totalFare: { type: Number, required: true },
+    fare: { type: String },
+    price: { type: Number },
     pickupLocation: {
-      lat: { type: Number, required: true },
-      lng: { type: Number, required: true },
+      type: {
+        type: String,
+        enum: ["Point"],
+        required: true,
+      },
+      coordinates: {
+        type: [Number],
+        required: true,
+        index: "2dsphere",
+      },
     },
     dropoffLocation: {
       lat: { type: Number, required: true },
@@ -35,9 +47,30 @@ const parcelBookingSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    paymentIntentId: { type: String },
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "authorized", "captured", "failed", "refunded", "cancelled"],
+      default: "pending",
+    },
+    paymentType: {
+      type: String,
+      enum: ["Cash", "Card"],
+      default: "Cash",
+    },
+    paymentMethod: { type: String },
     status: {
       type: String,
-      enum: ["pending", "accepted", "ongoing", "completed", "cancelled"],
+      enum: [
+        "pending",
+        "accepted",
+        "onTheWay",
+        "arrived",
+        "inProgress",
+        "completed",
+        "cancelled",
+        "rejected",
+      ],
       default: "pending",
     },
     notes: { type: String, default: "" },
@@ -46,7 +79,7 @@ const parcelBookingSchema = new mongoose.Schema(
       enum: [
         "document",
         "electronics",
-        "fargile",
+        "fragile",
         "household",
         "large",
         "medications",
@@ -60,9 +93,42 @@ const parcelBookingSchema = new mongoose.Schema(
       ref: "Rider",
       required: false,
     },
+    acceptedAt: Date,
+    onTheWayAt: Date,
+    arrivedAt: Date,
+    startedAt: Date,
+    completedAt: Date,
+    cancellationDetails: {
+      cancelledAt: Date,
+      cancelledBy: String,
+      reason: String,
+    },
+    statusHistory: [
+      {
+        status: String,
+        changedBy: mongoose.Schema.Types.ObjectId,
+        userRole: String,
+        reason: String,
+        changedAt: Date,
+      },
+    ],
+    locationHistory: [
+      {
+        location: {
+          type: {
+            type: String,
+            enum: ["Point"],
+          },
+          coordinates: [Number],
+        },
+        timestamp: Date,
+      },
+    ],
     created_at: { type: Date, default: Date.now },
   },
-  { timestamps: true },
+  { timestamps: true }
 );
+
+parcelBookingSchema.index({ pickupLocation: "2dsphere" });
 
 module.exports = mongoose.model("ParcelBooking", parcelBookingSchema);

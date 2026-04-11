@@ -33,6 +33,8 @@ app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api/pet", require("./routes/petBookingRoutes"));
 app.use("/api/webhook", webhookRoutes);
 app.use("/api", require("./routes/rideTypesRoutes"));
+app.use("/api/chats", require("./routes/chatRoutes"));
+app.use("/api/reviews", require("./routes/reviewRoutes"));
 
 app.get("/test", (req, res) => {
   res.json({ message: "Backend is alive!" });

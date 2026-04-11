@@ -75,7 +75,16 @@ const rideBookingSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "accepted", "ongoing", "completed", "cancelled"],
+      enum: [
+        "pending",
+        "accepted",
+        "onTheWay",
+        "arrived", 
+        "inProgress", 
+        "completed",
+        "cancelled",
+        "rejected",
+      ],
       default: "pending",
     },
     driver: {
@@ -107,7 +116,36 @@ const rideBookingSchema = new mongoose.Schema(
     price: {
       type: String,
     },
-
+    // Add these fields for tracking
+    acceptedAt: Date,
+    onTheWayAt: Date,
+    arrivedAt: Date, // Changed from reachedPickupAt
+    startedAt: Date, // Changed from ongoing
+    completedAt: Date,
+    waitingTime: Number,
+    waitingCharges: Number,
+    totalFare: Number,
+    statusHistory: [
+      {
+        status: String,
+        changedBy: mongoose.Schema.Types.ObjectId,
+        userRole: String,
+        reason: String,
+        changedAt: Date,
+      },
+    ],
+    locationHistory: [
+      {
+        location: {
+          type: {
+            type: String,
+            enum: ["Point"],
+          },
+          coordinates: [Number],
+        },
+        timestamp: Date,
+      },
+    ],
     created_at: { type: Date, default: Date.now },
   },
   { timestamps: true },

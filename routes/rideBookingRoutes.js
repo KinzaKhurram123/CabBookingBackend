@@ -18,9 +18,13 @@ const {
   getRideStatus,
   updateRiderStatus,
   approveRider,
+  getLocationHistory,
+  getDriverLocation,
+  updateDriverLocation,
 } = require("../controllers/rideBookingController");
 const { protect, authorize } = require("../middleware/authMiddleware");
 const { riderProtect } = require("../middleware/riderAuthMiddleware");
+const pusher = require("../config/pusher");
 
 const {
   setupPaymentMethod,
@@ -47,20 +51,28 @@ router.put(
   adminCancelRideBooking,
 );
 router.get("/bookings/cancelled", getCancelledBookings);
-// router.put("/accept_ride/:bookingId", protect, authorize("driver"), acceptRide);
-
 router.post("/accept/:bookingId", protect, riderProtect, acceptRide);
 router.put("/:bookingId/on-the-way", protect, riderProtect, riderOnTheWay);
-router.put("/:bookingId/reached-pickup", protect, reachedPickup);
-router.put("/:bookingId/start", protect, startRide);
-router.put("/:bookingId/complete", protect, completeRide);
-router.get("/:bookingId/status", protect, getRideStatus);
+router.put("/:bookingId/reached-pickup", protect, riderProtect, reachedPickup);
+router.put("/:bookingId/start", protect, riderProtect, startRide);
+router.put("/:bookingId/complete", protect, riderProtect, completeRide);
+router.get("/:bookingId/status", protect, riderProtect, getRideStatus);
 
 router.post("/payment/setup", protect, setupPaymentMethod);
 router.get("/payment/cards", protect, getUserCards);
 router.put("/payment/default-card", protect, setDefaultCard);
 router.delete("/payment/card/:paymentMethodId", protect, removeCard);
 router.get("/payment/status/:bookingId", protect, getPaymentStatus);
+router.put(
+  "/:bookingId/update-location",
+  protect,
+  riderProtect,
+  updateDriverLocation,
+);
+
+router.get("/:bookingId/track", protect, getDriverLocation);
+
+router.get("/:bookingId/location-history", protect, getLocationHistory);
 
 const fixBookingStatus = async (req, res) => {
   try {

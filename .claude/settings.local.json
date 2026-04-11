@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{print $NF}')",
+      "Bash(grep -E \"\\\\.js$\")",
+      "Bash(find D:\\\\Usama_cab_booking\\\\CabBooking_Backend:*)",
+      "Bash(grep -E \"\\\\.\\(js\\)$\")"
+    ]
+  }
+}

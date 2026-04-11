@@ -6,6 +6,7 @@ const parcelBooking = require("../models/parcelBooking");
 const petDeliveryBooking = require("../models/petDeliveryBooking");
 const { chargeCard } = require("./paymentController");
 const stripe = require("../config/stripe");
+const pusher = require("../config/pusher");
 
 function calculateDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -964,7 +965,6 @@ exports.riderOnTheWay = async (req, res) => {
     let { currentLocation } = req.body;
     const riderId = req.user?._id;
 
-    console.log("RiderId:", riderId, "Type:", typeof riderId);
     if (!riderId) {
       return res.status(401).json({
         success: false,
@@ -979,31 +979,7 @@ exports.riderOnTheWay = async (req, res) => {
       });
     }
 
-    if (currentLocation.latitude && currentLocation.longitude) {
-      currentLocation = {
-        coordinates: [currentLocation.longitude, currentLocation.latitude],
-      };
-    }
-
-    if (
-      !currentLocation.coordinates ||
-      !Array.isArray(currentLocation.coordinates) ||
-      currentLocation.coordinates.length !== 2
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "currentLocation.coordinates array with [longitude, latitude] is required",
-      });
-    }
-
     const booking = await RideBooking.findById(bookingId);
-    console.log("Booking:", {
-      id: booking._id,
-      driver: booking.driver,
-      driverType: typeof booking.driver,
-      status: booking.status,
-    });
     if (!booking) {
       return res.status(404).json({
         success: false,
@@ -1011,20 +987,14 @@ exports.riderOnTheWay = async (req, res) => {
       });
     }
 
-    if (!booking.driver) {
-      return res.status(403).json({
-        success: false,
-        message: "No driver assigned to this ride yet",
-      });
-    }
-
-    if (booking.driver.toString() !== riderId.toString()) {
+    if (!booking.driver || booking.driver.toString() !== riderId.toString()) {
       return res.status(403).json({
         success: false,
         message: "You are not assigned to this ride",
       });
     }
 
+    // Allow from 'accepted' status only
     if (booking.status !== "accepted") {
       return res.status(400).json({
         success: false,
@@ -1035,12 +1005,9 @@ exports.riderOnTheWay = async (req, res) => {
     booking.status = "onTheWay";
     booking.onTheWayAt = new Date();
 
-    await Rider.findByIdAndUpdate(riderId, {
-      location: {
-        type: "Point",
-        coordinates: currentLocation.coordinates,
-      },
-    });
+    if (!booking.statusHistory) {
+      booking.statusHistory = [];
+    }
 
     booking.statusHistory.push({
       status: "onTheWay",
@@ -1052,30 +1019,6 @@ exports.riderOnTheWay = async (req, res) => {
 
     await booking.save();
 
-    const rider = await Rider.findById(riderId);
-    const riderLocation =
-      rider?.location?.coordinates || currentLocation.coordinates;
-    const pickupCoords = booking.pickupLocation.coordinates;
-    let estimatedArrival = null;
-
-    if (
-      riderLocation &&
-      pickupCoords &&
-      riderLocation.length === 2 &&
-      pickupCoords.length === 2
-    ) {
-      const distanceToPickup = calculateDistance(
-        riderLocation[1],
-        riderLocation[0],
-        pickupCoords[1],
-        pickupCoords[0],
-      );
-      const estimatedMinutes = (distanceToPickup / 30) * 60;
-      estimatedArrival = new Date(
-        Date.now() + estimatedMinutes * 60000,
-      ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    }
-
     return res.status(200).json({
       success: true,
       message: "Rider is on the way to pickup",
@@ -1084,7 +1027,6 @@ exports.riderOnTheWay = async (req, res) => {
         status: booking.status,
         onTheWayAt: booking.onTheWayAt,
       },
-      estimatedArrivalAtPickup: estimatedArrival || "Calculating...",
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -1117,6 +1059,17 @@ exports.reachedPickup = async (req, res) => {
       });
     }
 
+    if (booking.status === "arrived") {
+      return res.status(200).json({
+        success: true,
+        message: "Already at pickup location",
+        booking: {
+          id: booking._id,
+          status: booking.status,
+        },
+      });
+    }
+
     if (booking.status !== "onTheWay") {
       return res.status(400).json({
         success: false,
@@ -1124,16 +1077,8 @@ exports.reachedPickup = async (req, res) => {
       });
     }
 
-    booking.status = "reachedPickup";
-    booking.reachedPickupAt = new Date();
-
-    booking.statusHistory.push({
-      status: "reachedPickup",
-      changedBy: riderId,
-      userRole: "driver",
-      reason: "Rider reached pickup location",
-      changedAt: new Date(),
-    });
+    booking.status = "arrived";
+    booking.arrivedAt = new Date();
 
     await booking.save();
 
@@ -1143,9 +1088,7 @@ exports.reachedPickup = async (req, res) => {
       booking: {
         id: booking._id,
         status: booking.status,
-        reachedPickupAt: booking.reachedPickupAt,
       },
-      timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error("Reached pickup error:", error);
@@ -1177,18 +1120,22 @@ exports.startRide = async (req, res) => {
       });
     }
 
-    if (booking.status !== "reachedPickup") {
+    if (booking.status !== "arrived" && booking.status !== "onTheWay") {
       return res.status(400).json({
         success: false,
-        message: `Cannot start ride. Current status: ${booking.status}`,
+        message: `Cannot start ride. Current status: ${booking.status}. Ride must be at pickup location.`,
       });
     }
 
-    booking.status = "ongoing";
+    booking.status = "inProgress";
     booking.startedAt = new Date();
 
+    if (!booking.statusHistory) {
+      booking.statusHistory = [];
+    }
+
     booking.statusHistory.push({
-      status: "ongoing",
+      status: "inProgress",
       changedBy: riderId,
       userRole: "driver",
       reason: "Ride started",
@@ -1197,10 +1144,16 @@ exports.startRide = async (req, res) => {
 
     await booking.save();
 
-    const estimatedArrival = calculateEstimatedArrival(
-      booking.duration,
-      new Date(),
-    );
+    try {
+      const channelName = `ride-${bookingId}`;
+      await pusher.trigger(channelName, "ride-status-update", {
+        bookingId: bookingId,
+        status: "inProgress",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (pusherError) {
+      console.error("Pusher trigger error:", pusherError);
+    }
 
     return res.status(200).json({
       success: true,
@@ -1209,7 +1162,6 @@ exports.startRide = async (req, res) => {
         id: booking._id,
         status: booking.status,
         startedAt: booking.startedAt,
-        estimatedArrival: estimatedArrival,
       },
       timestamp: new Date().toISOString(),
     });
@@ -1243,44 +1195,19 @@ exports.completeRide = async (req, res) => {
       });
     }
 
-    if (booking.status !== "ongoing") {
+    if (booking.status !== "inProgress") {
       return res.status(400).json({
         success: false,
         message: `Cannot complete ride. Current status: ${booking.status}`,
       });
     }
 
-    let paymentCaptureResult = null;
-    if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
-      try {
-        const capturedPayment = await chargeCard(booking);
-
-        if (capturedPayment.status === "succeeded") {
-          paymentCaptureResult = {
-            success: true,
-            amount: capturedPayment.amount / 100,
-            status: "captured",
-            transactionId: capturedPayment.id,
-          };
-          booking.paymentStatus = "captured";
-        } else {
-          throw new Error(
-            "Payment capture failed with status: " + capturedPayment.status,
-          );
-        }
-      } catch (paymentError) {
-        console.error("Payment capture error:", paymentError);
-        return res.status(400).json({
-          success: false,
-          message: "Payment failed. Ride cannot be completed.",
-          error: paymentError.message,
-          paymentError: true,
-        });
-      }
-    }
-
     booking.status = "completed";
     booking.completedAt = new Date();
+
+    if (!booking.statusHistory) {
+      booking.statusHistory = [];
+    }
 
     booking.statusHistory.push({
       status: "completed",
@@ -1292,14 +1219,39 @@ exports.completeRide = async (req, res) => {
 
     await booking.save();
 
-    await Rider.findByIdAndUpdate(riderId, {
-      $inc: { totalRides: 1 },
-      $set: { isAvailable: true },
-    });
+    try {
+      const Driver = require("../models/rider");
 
-    const finalFare = booking.fare;
-    const platformCommission = finalFare * 0.2;
-    const driverEarnings = finalFare * 0.8;
+      await Driver.findOneAndUpdate(
+        { user: riderId },
+        {
+          status: "available",
+          currentRideId: null,
+        },
+        { new: true },
+      );
+
+      console.log(`Driver ${riderId} status updated to available`);
+    } catch (driverUpdateError) {
+      console.error("Driver status update error:", driverUpdateError.message);
+    }
+
+    try {
+      const channelName = `ride-${bookingId}`;
+      await pusher.trigger(channelName, "ride-status-update", {
+        bookingId: bookingId,
+        status: "completed",
+        timestamp: new Date().toISOString(),
+      });
+
+      await pusher.trigger("driver-status", "driver-available", {
+        driverId: riderId,
+        status: "available",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (pusherError) {
+      console.error("Pusher error (non-critical):", pusherError.message);
+    }
 
     return res.status(200).json({
       success: true,
@@ -1308,25 +1260,8 @@ exports.completeRide = async (req, res) => {
         id: booking._id,
         status: booking.status,
         completedAt: booking.completedAt,
-        fare: booking.fare,
-        distance: booking.distance,
-        duration: booking.duration,
-        paymentStatus: booking.paymentStatus,
-        paymentType: booking.paymentType,
       },
-      payment: paymentCaptureResult,
-      earnings: {
-        totalFare: finalFare,
-        platformCommission: platformCommission,
-        driverEarnings: driverEarnings,
-      },
-      summary: {
-        totalTime:
-          Math.round((booking.completedAt - booking.startedAt) / 60000) +
-          " minutes",
-        amount: booking.fare,
-        paymentMethod: booking.paymentMethod,
-      },
+      driverStatus: "available",
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
@@ -1437,6 +1372,214 @@ exports.getPaymentStatus = async (req, res) => {
   res.status(200).json({ success: true, status: "pending" });
 };
 
+exports.updateDriverLocation = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { latitude, longitude } = req.body;
+    const driverId = req.user?._id;
+
+    if (!latitude || !longitude) {
+      return res.status(400).json({
+        success: false,
+        message: "Latitude and longitude are required",
+      });
+    }
+
+    const booking = await RideBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    if (booking.driver.toString() !== driverId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not assigned to this ride",
+      });
+    }
+
+    await Rider.findByIdAndUpdate(driverId, {
+      location: {
+        type: "Point",
+        coordinates: [longitude, latitude],
+      },
+      lastLocationUpdate: new Date(),
+    });
+
+    if (!booking.locationHistory) {
+      booking.locationHistory = [];
+    }
+    booking.locationHistory.push({
+      location: {
+        type: "Point",
+        coordinates: [longitude, latitude],
+      },
+      timestamp: new Date(),
+    });
+
+    if (booking.locationHistory.length > 100) {
+      booking.locationHistory.shift();
+    }
+    await booking.save();
+
+    const channelName = `ride-${bookingId}`;
+    pusher.trigger(channelName, "driver-location-update", {
+      driverId: driverId,
+      latitude: latitude,
+      longitude: longitude,
+      timestamp: new Date().toISOString(),
+      status: booking.status,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Location updated successfully",
+      data: {
+        latitude,
+        longitude,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("Location update error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getDriverLocation = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const userId = req.user?._id;
+
+    const booking = await RideBooking.findById(bookingId).populate(
+      "driver",
+      "name phoneNumber location profileImage vehicleDetails",
+    );
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    // Check if user is the customer of this ride
+    if (booking.user.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to track this ride",
+      });
+    }
+
+    // Check if ride is active
+    const activeStatuses = [
+      "accepted",
+      "onTheWay",
+      "reachedPickup",
+      "started",
+      "inProgress",
+    ];
+    if (!activeStatuses.includes(booking.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `Ride is not active for tracking. Current status: ${booking.status}`,
+      });
+    }
+
+    const driverLocation = booking.driver?.location?.coordinates || null;
+
+    // Calculate ETA
+    let eta = null;
+    if (driverLocation && booking.pickupLocation?.coordinates) {
+      const distance = calculateDistance(
+        driverLocation[1],
+        driverLocation[0],
+        booking.pickupLocation.coordinates[1],
+        booking.pickupLocation.coordinates[0],
+      );
+      const estimatedMinutes = Math.ceil((distance / 30) * 60);
+      eta = estimatedMinutes;
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        driver: {
+          name: booking.driver?.name,
+          phoneNumber: booking.driver?.phoneNumber,
+          profileImage: booking.driver?.profileImage,
+          vehicleDetails: booking.driver?.vehicleDetails,
+        },
+        currentLocation: driverLocation
+          ? {
+              latitude: driverLocation[1],
+              longitude: driverLocation[0],
+            }
+          : null,
+        eta: eta ? `${eta} minutes` : "Calculating...",
+        rideStatus: booking.status,
+        lastUpdated: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    console.error("Get location error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getLocationHistory = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const userId = req.user?._id;
+
+    const booking = await RideBooking.findById(bookingId);
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    // Allow access to admin or ride participants
+    const isAdmin = req.user?.role === "admin";
+    const isDriver = booking.driver?.toString() === userId?.toString();
+    const isCustomer = booking.user?.toString() === userId?.toString();
+
+    if (!isAdmin && !isDriver && !isCustomer) {
+      return res.status(403).json({
+        success: false,
+        message: "Not authorized",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        locationHistory: booking.locationHistory || [],
+        totalUpdates: booking.locationHistory?.length || 0,
+      },
+    });
+  } catch (error) {
+    console.error("Location history error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   createRideBooking: exports.createRideBooking,
   getNearbyRides: exports.getNearbyRides,
@@ -1460,4 +1603,7 @@ module.exports = {
   setDefaultCard: exports.setDefaultCard,
   removeCard: exports.removeCard,
   getPaymentStatus: exports.getPaymentStatus,
+  getDriverLocation: exports.getDriverLocation,
+  getLocationHistory: exports.getLocationHistory,
+  updateDriverLocation: exports.updateDriverLocation,
 };
