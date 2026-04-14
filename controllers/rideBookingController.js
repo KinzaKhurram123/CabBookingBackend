@@ -179,6 +179,35 @@ exports.createRideBooking = async (req, res) => {
       new Date(),
     );
 
+    // Notify nearby drivers via Pusher
+    const pusherPayload = {
+      bookingId: savedBooking._id,
+      type: "ride",
+      status: "pending",
+      pickupLocationName: populatedBooking.pickupLocationName,
+      dropoffLocationName: populatedBooking.dropoffLocationName,
+      fare: populatedBooking.fare,
+      distance: populatedBooking.distance,
+      duration: populatedBooking.duration,
+      vehicleName: req.body.selectedVehicle.name,
+      pickupCoords: pickupCoords,
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      await pusher.trigger("ride-bookings", "new-ride-booking", pusherPayload);
+    } catch (pusherError) {
+      console.error("Pusher trigger error (non-critical):", pusherError.message);
+    }
+
+    for (const rider of nearbyRiders) {
+      try {
+        await pusher.trigger(`rider-${rider._id}`, "new-ride-booking", pusherPayload);
+      } catch (pusherError) {
+        console.error(`Pusher error for rider ${rider._id}:`, pusherError.message);
+      }
+    }
+
     return res.status(201).json({
       success: true,
       message: "Ride booked successfully",
@@ -506,6 +535,20 @@ exports.acceptRide = async (req, res) => {
         populate: { path: "user", select: "name email phoneNumber" },
       });
 
+    try {
+      await pusher.trigger(`ride-${bookingId}`, "ride-status-update", {
+        bookingId,
+        status: "accepted",
+        driver: {
+          id: rider._id,
+          name: rider.user?.name,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (pusherError) {
+      console.error("Pusher error (non-critical):", pusherError.message);
+    }
+
     res.status(200).json({
       success: true,
       message: "Ride accepted successfully",
@@ -686,6 +729,16 @@ exports.cancelRideBooking = async (req, res) => {
       console.log(
         `Booking ${bookingId} cancelled. Driver ${booking.driver} notified.`,
       );
+      try {
+        await pusher.trigger(`ride-${bookingId}`, "ride-status-update", {
+          bookingId,
+          status: "cancelled",
+          cancelledBy: "user",
+          timestamp: new Date().toISOString(),
+        });
+      } catch (pusherError) {
+        console.error("Pusher error (non-critical):", pusherError.message);
+      }
     }
 
     return res.status(200).json({
@@ -1019,6 +1072,16 @@ exports.riderOnTheWay = async (req, res) => {
 
     await booking.save();
 
+    try {
+      await pusher.trigger(`ride-${bookingId}`, "ride-status-update", {
+        bookingId,
+        status: "onTheWay",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (pusherError) {
+      console.error("Pusher error (non-critical):", pusherError.message);
+    }
+
     return res.status(200).json({
       success: true,
       message: "Rider is on the way to pickup",
@@ -1081,6 +1144,16 @@ exports.reachedPickup = async (req, res) => {
     booking.arrivedAt = new Date();
 
     await booking.save();
+
+    try {
+      await pusher.trigger(`ride-${bookingId}`, "ride-status-update", {
+        bookingId,
+        status: "arrived",
+        timestamp: new Date().toISOString(),
+      });
+    } catch (pusherError) {
+      console.error("Pusher error (non-critical):", pusherError.message);
+    }
 
     return res.status(200).json({
       success: true,
@@ -1217,21 +1290,41 @@ exports.completeRide = async (req, res) => {
       changedAt: new Date(),
     });
 
+    // Capture payment if Card
+    if (
+      booking.paymentType === "Card" &&
+      booking.paymentIntentId &&
+      booking.paymentStatus === "authorized"
+    ) {
+      try {
+        await stripe.paymentIntents.capture(booking.paymentIntentId);
+        booking.paymentStatus = "captured";
+        console.log(`Payment captured for ride ${bookingId}`);
+      } catch (paymentError) {
+        console.error("Payment capture error:", paymentError.message);
+      }
+    }
+
     await booking.save();
 
+    // Update driver earnings & wallet
+    const fare = parseFloat(booking.fare || booking.price || 0);
+    const driverShare = parseFloat((fare * 0.8).toFixed(2)); // 80% to driver
     try {
-      const Driver = require("../models/rider");
-
-      await Driver.findOneAndUpdate(
+      await Rider.findOneAndUpdate(
         { user: riderId },
         {
           status: "available",
-          currentRideId: null,
+          currentRide: null,
+          $inc: {
+            totalRides: 1,
+            totalEarning: driverShare,
+            walletBalance: driverShare,
+          },
         },
         { new: true },
       );
-
-      console.log(`Driver ${riderId} status updated to available`);
+      console.log(`Driver ${riderId} earnings updated: +${driverShare}`);
     } catch (driverUpdateError) {
       console.error("Driver status update error:", driverUpdateError.message);
     }

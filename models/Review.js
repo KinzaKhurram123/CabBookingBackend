@@ -21,6 +21,11 @@ const reviewSchema = new mongoose.Schema(
       enum: ["driver", "user"],
       required: true,
     },
+    driverId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Rider",
+      default: null,
+    },
     rating: {
       type: Number,
       required: true,

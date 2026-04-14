@@ -1,31 +1,39 @@
 const Message = require("../models/messageModel");
 const RideBooking = require("../models/rideBooking");
+const ParcelBooking = require("../models/parcelBooking");
+const PetDeliveryBooking = require("../models/petDeliveryBooking");
 const User = require("../models/user");
+const pusher = require("../config/pusher");
 
 const sendMessage = async (req, res) => {
   try {
-    const { rideId, receiverId, content } = req.body;
-    const senderId = req.user.id;
+    // Support both rideId (old) and bookingId+bookingType (new)
+    const bookingId = req.body.bookingId || req.body.rideId;
+    const bookingType = req.body.bookingType || "ride";
+    const { receiverId, content } = req.body;
+    const senderId = req.user._id || req.user.id;
 
-    console.log("Send message request:", {
-      rideId,
-      receiverId,
-      content,
-      senderId,
-    });
-
-    if (!rideId || !receiverId || !content) {
+    if (!bookingId || !receiverId || !content) {
       return res.status(400).json({
         success: false,
-        message: "Please provide rideId, receiverId, and content",
+        message: "Please provide bookingId (or rideId), receiverId, and content",
       });
     }
 
-    const ride = await RideBooking.findById(rideId);
-    if (!ride) {
+    // Find booking based on type
+    let booking = null;
+    if (bookingType === "parcel") {
+      booking = await ParcelBooking.findById(bookingId);
+    } else if (bookingType === "pet") {
+      booking = await PetDeliveryBooking.findById(bookingId);
+    } else {
+      booking = await RideBooking.findById(bookingId);
+    }
+
+    if (!booking) {
       return res.status(404).json({
         success: false,
-        message: "Ride not found",
+        message: "Booking not found",
       });
     }
 
@@ -37,36 +45,40 @@ const sendMessage = async (req, res) => {
       });
     }
 
-    const isDriver = ride.driver && ride.driver.toString() === senderId;
-    const isRider = ride.user && ride.user.toString() === senderId;
+    const isUser = booking.user?.toString() === senderId.toString();
+    const isDriver = booking.driver?.toString() === senderId.toString();
     const isAdmin = req.user.role === "admin";
 
-    if (!isDriver && !isRider && !isAdmin) {
+    if (!isUser && !isDriver && !isAdmin) {
       return res.status(403).json({
         success: false,
-        message: "You are not authorized to send messages for this ride",
+        message: "You are not authorized to send messages for this booking",
       });
     }
 
     const newMessage = await Message.create({
-      rideId,
+      bookingId,
+      bookingType,
+      rideId: bookingType === "ride" ? bookingId : undefined, // backward compat
       sender: senderId,
       receiver: receiverId,
-      content: content,
+      content,
       isRead: false,
     });
 
     const populatedMessage = await Message.findById(newMessage._id)
-      .populate("sender", "name email profilePicture")
-      .populate("receiver", "name email profilePicture");
+      .populate("sender", "name email profileImage")
+      .populate("receiver", "name email profileImage");
+
+    // Pusher channel: ride-{id}, parcel-chat-{id}, pet-chat-{id}
+    const channel = bookingType === "ride"
+      ? `ride-${bookingId}`
+      : `${bookingType}-chat-${bookingId}`;
 
     try {
-      const pusher = require("../config/pusher");
-      if (pusher) {
-        await pusher.trigger(`ride-${rideId}`, "new-message", populatedMessage);
-      }
+      await pusher.trigger(channel, "new-message", populatedMessage);
     } catch (pusherError) {
-      console.log("Pusher not configured, skipping:", pusherError.message);
+      console.log("Pusher error (non-critical):", pusherError.message);
     }
 
     res.status(201).json({
@@ -86,48 +98,53 @@ const sendMessage = async (req, res) => {
 
 const getMessages = async (req, res) => {
   try {
-    const { rideId } = req.params;
-    const userId = req.user.id;
-
-    console.log(`Getting messages for ride: ${rideId}, user: ${userId}`);
-    console.log(`RideId type: ${typeof rideId}, value: ${rideId}`);
+    const { rideId } = req.params; // rideId param = bookingId (same route)
+    const bookingType = req.query.bookingType || "ride";
+    const userId = req.user._id || req.user.id;
 
     const mongoose = require("mongoose");
     const objectId = new mongoose.Types.ObjectId(rideId);
 
-    console.log(`Converted to ObjectId: ${objectId}`);
+    // Find booking based on type
+    let booking = null;
+    if (bookingType === "parcel") {
+      booking = await ParcelBooking.findById(rideId);
+    } else if (bookingType === "pet") {
+      booking = await PetDeliveryBooking.findById(rideId);
+    } else {
+      booking = await RideBooking.findById(rideId);
+    }
 
-    const ride = await RideBooking.findById(rideId);
-    if (!ride) {
+    if (!booking) {
       return res.status(404).json({
         success: false,
-        message: "Ride not found",
+        message: "Booking not found",
         messages: [],
       });
     }
 
-    const isDriver = ride.driver && ride.driver.toString() === userId;
-    const isRider = ride.user && ride.user.toString() === userId;
+    const isUser = booking.user?.toString() === userId.toString();
+    const isDriver = booking.driver?.toString() === userId.toString();
     const isAdmin = req.user.role === "admin";
 
-    if (!isDriver && !isRider && !isAdmin) {
-      console.log(`Unauthorized: User ${userId} not in ride ${rideId}`);
+    if (!isUser && !isDriver && !isAdmin) {
       return res.status(403).json({
         success: false,
-        message: "You are not authorized to view messages for this ride",
+        message: "You are not authorized to view messages for this booking",
         messages: [],
       });
     }
 
-    // ✅ FIX: Use ObjectId for query
-    const messages = await Message.find({ rideId: objectId }) // Use ObjectId
-      .populate("sender", "name email profilePicture")
-      .populate("receiver", "name email profilePicture")
-      .sort({ createdAt: 1 })
-      .lean(); // Add lean() for better performance
+    // For ride: query by rideId (backward compat), for others: by bookingId+bookingType
+    const query = bookingType === "ride"
+      ? { rideId: objectId }
+      : { bookingId: objectId, bookingType };
 
-    console.log(`Found ${messages.length} messages`);
-    console.log("Messages:", JSON.stringify(messages, null, 2));
+    const messages = await Message.find(query)
+      .populate("sender", "name email profileImage")
+      .populate("receiver", "name email profileImage")
+      .sort({ createdAt: 1 })
+      .lean();
 
     res.status(200).json({
       success: true,
@@ -148,38 +165,17 @@ const getMessages = async (req, res) => {
 const markMessagesAsRead = async (req, res) => {
   try {
     const { rideId } = req.params;
-    const userId = req.user.id;
+    const bookingType = req.query.bookingType || "ride";
+    const userId = req.user._id || req.user.id;
 
-    const ride = await RideBooking.findById(rideId);
-    if (!ride) {
-      return res.status(404).json({
-        success: false,
-        message: "Ride not found",
-      });
-    }
+    const query = bookingType === "ride"
+      ? { rideId, receiver: userId, isRead: false }
+      : { bookingId: rideId, bookingType, receiver: userId, isRead: false };
 
-    const isAuthorized =
-      (ride.driver && ride.driver.toString() === userId) ||
-      (ride.user && ride.user.toString() === userId);
-
-    if (!isAuthorized && req.user.role !== "admin") {
-      return res.status(403).json({
-        success: false,
-        message: "Not authorized",
-      });
-    }
-
-    const result = await Message.updateMany(
-      {
-        rideId,
-        receiver: userId,
-        isRead: false,
-      },
-      {
-        isRead: true,
-        readAt: new Date(),
-      },
-    );
+    const result = await Message.updateMany(query, {
+      isRead: true,
+      readAt: new Date(),
+    });
 
     res.status(200).json({
       success: true,
@@ -341,6 +337,190 @@ const debugMessages = async (req, res) => {
   }
 };
 
+// ─── PARCEL & PET CHAT ───────────────────────────────────────────────────────
+
+// Helper to get booking by type
+const getBooking = async (bookingId, bookingType) => {
+  if (bookingType === "parcel") return await ParcelBooking.findById(bookingId);
+  if (bookingType === "pet") return await PetDeliveryBooking.findById(bookingId);
+  return await RideBooking.findById(bookingId);
+};
+
+const sendDeliveryMessage = async (req, res) => {
+  try {
+    const { bookingId, bookingType, receiverId, content } = req.body;
+    const senderId = req.user._id || req.user.id;
+
+    if (!bookingId || !bookingType || !receiverId || !content) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId, bookingType, receiverId, and content are required",
+      });
+    }
+
+    if (!["parcel", "pet"].includes(bookingType)) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingType must be 'parcel' or 'pet'",
+      });
+    }
+
+    const booking = await getBooking(bookingId, bookingType);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    // Check sender is part of this booking (user or driver)
+    const isUser = booking.user?.toString() === senderId.toString();
+    const isDriver = booking.driver?.toString() === senderId.toString();
+    const isAdmin = req.user.role === "admin";
+
+    if (!isUser && !isDriver && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to send messages for this booking",
+      });
+    }
+
+    const receiver = await User.findById(receiverId);
+    if (!receiver) {
+      return res.status(404).json({
+        success: false,
+        message: "Receiver not found",
+      });
+    }
+
+    const newMessage = await Message.create({
+      bookingId,
+      bookingType,
+      sender: senderId,
+      receiver: receiverId,
+      content,
+      isRead: false,
+    });
+
+    const populatedMessage = await Message.findById(newMessage._id)
+      .populate("sender", "name email profileImage")
+      .populate("receiver", "name email profileImage");
+
+    // Pusher real-time — channel: parcel-chat-{bookingId} or pet-chat-{bookingId}
+    try {
+      await pusher.trigger(
+        `${bookingType}-chat-${bookingId}`,
+        "new-message",
+        populatedMessage,
+      );
+    } catch (pusherError) {
+      console.error("Pusher error (non-critical):", pusherError.message);
+    }
+
+    res.status(201).json({
+      success: true,
+      message: "Message sent successfully",
+      data: populatedMessage,
+    });
+  } catch (error) {
+    console.error("Send delivery message error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error sending message",
+      error: error.message,
+    });
+  }
+};
+
+const getDeliveryMessages = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { bookingType } = req.query; // ?bookingType=parcel or ?bookingType=pet
+    const userId = req.user._id || req.user.id;
+
+    if (!bookingType || !["parcel", "pet"].includes(bookingType)) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingType query param required: 'parcel' or 'pet'",
+      });
+    }
+
+    const booking = await getBooking(bookingId, bookingType);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const isUser = booking.user?.toString() === userId.toString();
+    const isDriver = booking.driver?.toString() === userId.toString();
+    const isAdmin = req.user.role === "admin";
+
+    if (!isUser && !isDriver && !isAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not authorized to view messages for this booking",
+      });
+    }
+
+    const mongoose = require("mongoose");
+    const messages = await Message.find({
+      bookingId: new mongoose.Types.ObjectId(bookingId),
+      bookingType,
+    })
+      .populate("sender", "name email profileImage")
+      .populate("receiver", "name email profileImage")
+      .sort({ createdAt: 1 })
+      .lean();
+
+    res.status(200).json({
+      success: true,
+      count: messages.length,
+      messages,
+    });
+  } catch (error) {
+    console.error("Get delivery messages error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error fetching messages",
+      error: error.message,
+    });
+  }
+};
+
+const markDeliveryMessagesAsRead = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { bookingType } = req.query;
+    const userId = req.user._id || req.user.id;
+
+    if (!bookingType) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingType query param required",
+      });
+    }
+
+    const result = await Message.updateMany(
+      { bookingId, bookingType, receiver: userId, isRead: false },
+      { isRead: true, readAt: new Date() },
+    );
+
+    res.status(200).json({
+      success: true,
+      message: "Messages marked as read",
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    console.error("Mark delivery messages as read error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error marking messages as read",
+    });
+  }
+};
+
 module.exports = {
   sendMessage,
   getMessages,
@@ -350,4 +530,7 @@ module.exports = {
   testChat,
   debugRideAccess,
   debugMessages,
+  sendDeliveryMessage,
+  getDeliveryMessages,
+  markDeliveryMessagesAsRead,
 };

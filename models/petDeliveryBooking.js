@@ -45,8 +45,8 @@ const petDeliveryBookingSchema = new mongoose.Schema(
       },
     },
     dropoffLocation: {
-      lat: { type: Number, required: true },
-      lng: { type: Number, required: true },
+      type: mongoose.Schema.Types.Mixed,
+      required: true,
     },
     distance: { type: String },
     time: { type: String },
@@ -120,6 +120,27 @@ const petDeliveryBookingSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
+petDeliveryBookingSchema.methods.normalizeDropoffLocation = function() {
+  if (this.dropoffLocation?.type === "Point" && this.dropoffLocation?.coordinates) {
+    const [lng, lat] = this.dropoffLocation.coordinates;
+    this.dropoffLocation = { lat, lng };
+  }
+  return this;
+};
+
+petDeliveryBookingSchema.virtual("dropoffCoordinates").get(function() {
+  if (this.dropoffLocation?.type === "Point" && this.dropoffLocation?.coordinates) {
+    return {
+      lat: this.dropoffLocation.coordinates[1],
+      lng: this.dropoffLocation.coordinates[0]
+    };
+  }
+  if (this.dropoffLocation?.lat && this.dropoffLocation?.lng) {
+    return this.dropoffLocation;
+  }
+  return null;
+});
 
 petDeliveryBookingSchema.index({ pickupLocation: "2dsphere" });
 

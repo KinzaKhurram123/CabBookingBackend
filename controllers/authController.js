@@ -1,9 +1,20 @@
 const User = require("../models/user");
 const generateToken = require("../utils/generateToken");
 const bcrypt = require("bcryptjs");
+const { applyReferralCode } = require("./referralController");
+const crypto = require("crypto");
+
+const generateReferralCode = (userId) => {
+  return "REF" + crypto
+    .createHash("sha256")
+    .update(userId.toString())
+    .digest("hex")
+    .toUpperCase()
+    .slice(0, 8);
+};
 
 exports.registerUser = async (req, res) => {
-  const { name, email, password, role, phoneNumber } = req.body;
+  const { name, email, password, role, phoneNumber, referralCode } = req.body;
   try {
     const userExists = await User.findOne({ email });
     if (userExists) {
@@ -18,6 +29,15 @@ exports.registerUser = async (req, res) => {
       phoneNumber,
     });
 
+    // Generate referral code for new user
+    user.referralCode = generateReferralCode(user._id);
+    await user.save();
+
+    // Apply referral if code provided
+    if (referralCode) {
+      await applyReferralCode(referralCode, user._id);
+    }
+
     if (user) {
       res.status(201).json({
         _id: user._id,
@@ -25,6 +45,8 @@ exports.registerUser = async (req, res) => {
         email: user.email,
         role: user.role,
         phoneNumber: user.phoneNumber,
+        referralCode: user.referralCode,
+        walletBalance: user.walletBalance,
         token: generateToken(user._id),
       });
     } else {

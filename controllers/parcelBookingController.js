@@ -182,7 +182,10 @@ exports.createParcelBooking = async (req, res) => {
     // Convert pickupLocation to GeoJSON format for geospatial queries
     const pickupGeoJSON = {
       type: "Point",
-      coordinates: [parseFloat(pickupLocation.lng), parseFloat(pickupLocation.lat)],
+      coordinates: [
+        parseFloat(pickupLocation.lng),
+        parseFloat(pickupLocation.lat),
+      ],
     };
 
     const newBooking = new ParcelBooking({
@@ -246,6 +249,47 @@ exports.createParcelBooking = async (req, res) => {
       isVerified: true,
     });
 
+    // Notify each nearby rider via Pusher in real-time
+    const pusherPayload = {
+      bookingId: savedBooking._id,
+      type: "parcel",
+      status: "pending",
+      pickupLocationName: savedBooking.pickupLocationName,
+      dropoffLocationName: savedBooking.dropoffLocationName,
+      fare: savedBooking.totalFare,
+      distance: savedBooking.distance,
+      estimatedTime: savedBooking.estimateTime,
+      vehicleType: savedBooking.selectedVehicle,
+      weight: savedBooking.weight,
+      fragile: savedBooking.fragileItem,
+      cargoType: savedBooking.cargoType,
+      pickupCoords: {
+        lat: pickupLocation.lat,
+        lng: pickupLocation.lng,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    // Trigger on a global parcel channel so all nearby drivers listening get it
+    try {
+      await pusher.trigger("parcel-bookings", "new-parcel-booking", pusherPayload);
+    } catch (pusherError) {
+      console.error("Pusher trigger error (non-critical):", pusherError.message);
+    }
+
+    // Also trigger on each individual rider's personal channel
+    for (const rider of nearbyRiders) {
+      try {
+        await pusher.trigger(
+          `rider-${rider._id}`,
+          "new-parcel-booking",
+          pusherPayload,
+        );
+      } catch (pusherError) {
+        console.error(`Pusher error for rider ${rider._id}:`, pusherError.message);
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: "Parcel delivery booking created successfully",
@@ -281,7 +325,8 @@ exports.createParcelBooking = async (req, res) => {
     if (error.type === "StripeCardError") {
       return res.status(400).json({
         success: false,
-        message: "Your card was declined. Please use a different payment method.",
+        message:
+          "Your card was declined. Please use a different payment method.",
         error: error.message,
       });
     }
@@ -447,7 +492,7 @@ exports.cancelParcelBooking = async (req, res) => {
     if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
       try {
         const cancelledPayment = await stripe.paymentIntents.cancel(
-          booking.paymentIntentId
+          booking.paymentIntentId,
         );
 
         paymentCancellationResult = {
@@ -461,7 +506,8 @@ exports.cancelParcelBooking = async (req, res) => {
         paymentCancellationResult = {
           success: false,
           error: paymentError.message,
-          message: "Payment could not be released automatically. Please contact support.",
+          message:
+            "Payment could not be released automatically. Please contact support.",
         };
       }
     }
@@ -488,7 +534,9 @@ exports.cancelParcelBooking = async (req, res) => {
           status: "available",
           currentRide: null,
         });
-        console.log(`Booking ${bookingId} cancelled. Driver ${booking.driver} set to available.`);
+        console.log(
+          `Booking ${bookingId} cancelled. Driver ${booking.driver} set to available.`,
+        );
       } catch (driverError) {
         console.error("Driver update error:", driverError.message);
       }
@@ -557,7 +605,7 @@ exports.driverCancelParcelDelivery = async (req, res) => {
     if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
       try {
         const cancelledPayment = await stripe.paymentIntents.cancel(
-          booking.paymentIntentId
+          booking.paymentIntentId,
         );
 
         paymentCancellationResult = {
@@ -699,16 +747,11 @@ exports.adminCancelParcelDelivery = async (req, res) => {
 // Driver Workflow Endpoints
 
 exports.acceptParcelDelivery = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const bookingId = req.params.bookingId || req.body.bookingId;
     const rider = req.rider;
 
     if (!rider) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(401).json({
         success: false,
         message: "Rider not authenticated. Please login again.",
@@ -716,55 +759,13 @@ exports.acceptParcelDelivery = async (req, res) => {
     }
 
     if (!bookingId) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Booking ID is required",
       });
     }
 
-    const booking = await ParcelBooking.findById(bookingId).session(session);
-
-    if (!booking) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
-    }
-
-    if (booking.user.toString() === rider.user.toString()) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "You cannot accept your own parcel delivery booking",
-      });
-    }
-
-    if (booking.status !== "pending") {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: `This delivery is no longer available. Current status: ${booking.status}`,
-      });
-    }
-
-    if (booking.driver) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "This delivery has already been accepted by another driver.",
-      });
-    }
-
-    if (rider.status !== "available") {
-      await session.abortTransaction();
-      session.endSession();
+    if (rider.status === "busy") {
       return res.status(400).json({
         success: false,
         message: `You are not available to accept new deliveries. Current status: ${rider.status}`,
@@ -772,8 +773,6 @@ exports.acceptParcelDelivery = async (req, res) => {
     }
 
     if (!rider.isVerified) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(403).json({
         success: false,
         message: "Your account is not verified yet. Please wait for admin approval.",
@@ -781,17 +780,40 @@ exports.acceptParcelDelivery = async (req, res) => {
       });
     }
 
-    booking.status = "accepted";
-    booking.driver = rider._id;
-    booking.acceptedAt = new Date();
-    await booking.save({ session });
+    // Find booking first
+    const existingBooking = await ParcelBooking.findById(bookingId);
 
-    rider.status = "busy";
-    rider.currentRide = booking._id;
-    await rider.save({ session });
+    if (!existingBooking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
 
-    await session.commitTransaction();
-    session.endSession();
+    if (existingBooking.user.toString() === rider.user.toString()) {
+      return res.status(400).json({ success: false, message: "You cannot accept your own parcel delivery booking" });
+    }
+
+    if (existingBooking.status !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: `This delivery is no longer available. Current status: ${existingBooking.status}`,
+      });
+    }
+
+    if (existingBooking.driver) {
+      return res.status(400).json({ success: false, message: "Already accepted by another driver" });
+    }
+
+    // Direct update
+    await ParcelBooking.updateOne(
+      { _id: bookingId },
+      { $set: { status: "accepted", driver: rider._id, acceptedAt: new Date() } }
+    );
+
+    const booking = await ParcelBooking.findById(bookingId);
+
+    // Update rider status atomically as well
+    await Rider.findByIdAndUpdate(rider._id, {
+      $set: { status: "busy", currentRide: booking._id },
+    });
 
     const populatedBooking = await ParcelBooking.findById(booking._id)
       .populate("user", "name email phoneNumber profileImage")
@@ -801,15 +823,19 @@ exports.acceptParcelDelivery = async (req, res) => {
       });
 
     try {
-      await pusher.trigger(`parcel-delivery-${bookingId}`, "delivery-accepted", {
-        bookingId: bookingId,
-        status: "accepted",
-        driver: {
-          id: rider._id,
-          name: rider.user?.name,
+      await pusher.trigger(
+        `parcel-delivery-${bookingId}`,
+        "delivery-accepted",
+        {
+          bookingId: bookingId,
+          status: "accepted",
+          driver: {
+            id: rider._id,
+            name: rider.user?.name,
+          },
+          timestamp: new Date().toISOString(),
         },
-        timestamp: new Date().toISOString(),
-      });
+      );
     } catch (pusherError) {
       console.error("Pusher error (non-critical):", pusherError.message);
     }
@@ -821,14 +847,12 @@ exports.acceptParcelDelivery = async (req, res) => {
         booking: populatedBooking,
         rider: {
           id: rider._id,
-          status: rider.status,
-          currentRide: rider.currentRide,
+          status: "busy",
+          currentRide: booking._id,
         },
       },
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
     console.error("Accept parcel delivery error:", error);
     res.status(500).json({
       success: false,
@@ -841,12 +865,12 @@ exports.acceptParcelDelivery = async (req, res) => {
 exports.parcelDeliveryOnTheWay = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user?._id;
+    const riderId = req.rider?._id;
 
     if (!riderId) {
       return res.status(401).json({
         success: false,
-        message: "User not authenticated",
+        message: "Rider not authenticated",
       });
     }
 
@@ -890,11 +914,15 @@ exports.parcelDeliveryOnTheWay = async (req, res) => {
     await booking.save();
 
     try {
-      await pusher.trigger(`parcel-delivery-${bookingId}`, "delivery-status-update", {
-        bookingId: bookingId,
-        status: "onTheWay",
-        timestamp: new Date().toISOString(),
-      });
+      await pusher.trigger(
+        `parcel-delivery-${bookingId}`,
+        "delivery-status-update",
+        {
+          bookingId: bookingId,
+          status: "onTheWay",
+          timestamp: new Date().toISOString(),
+        },
+      );
     } catch (pusherError) {
       console.error("Pusher error (non-critical):", pusherError.message);
     }
@@ -922,7 +950,7 @@ exports.parcelDeliveryOnTheWay = async (req, res) => {
 exports.parcelDeliveryReachedPickup = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider?._id;
 
     const booking = await ParcelBooking.findById(bookingId);
     if (!booking) {
@@ -963,11 +991,15 @@ exports.parcelDeliveryReachedPickup = async (req, res) => {
     await booking.save();
 
     try {
-      await pusher.trigger(`parcel-delivery-${bookingId}`, "delivery-status-update", {
-        bookingId: bookingId,
-        status: "arrived",
-        timestamp: new Date().toISOString(),
-      });
+      await pusher.trigger(
+        `parcel-delivery-${bookingId}`,
+        "delivery-status-update",
+        {
+          bookingId: bookingId,
+          status: "arrived",
+          timestamp: new Date().toISOString(),
+        },
+      );
     } catch (pusherError) {
       console.error("Pusher error (non-critical):", pusherError.message);
     }
@@ -994,7 +1026,7 @@ exports.parcelDeliveryReachedPickup = async (req, res) => {
 exports.startParcelDelivery = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider?._id;
 
     const booking = await ParcelBooking.findById(bookingId);
     if (!booking) {
@@ -1036,11 +1068,15 @@ exports.startParcelDelivery = async (req, res) => {
     await booking.save();
 
     try {
-      await pusher.trigger(`parcel-delivery-${bookingId}`, "delivery-status-update", {
-        bookingId: bookingId,
-        status: "inProgress",
-        timestamp: new Date().toISOString(),
-      });
+      await pusher.trigger(
+        `parcel-delivery-${bookingId}`,
+        "delivery-status-update",
+        {
+          bookingId: bookingId,
+          status: "inProgress",
+          timestamp: new Date().toISOString(),
+        },
+      );
     } catch (pusherError) {
       console.error("Pusher trigger error:", pusherError);
     }
@@ -1068,7 +1104,7 @@ exports.startParcelDelivery = async (req, res) => {
 exports.completeParcelDelivery = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider?._id;
 
     const booking = await ParcelBooking.findById(bookingId);
     if (!booking) {
@@ -1108,9 +1144,15 @@ exports.completeParcelDelivery = async (req, res) => {
     });
 
     // Capture payment if Card payment
-    if (booking.paymentType === "Card" && booking.paymentIntentId && booking.paymentStatus === "authorized") {
+    if (
+      booking.paymentType === "Card" &&
+      booking.paymentIntentId &&
+      booking.paymentStatus === "authorized"
+    ) {
       try {
-        const paymentIntent = await stripe.paymentIntents.capture(booking.paymentIntentId);
+        const paymentIntent = await stripe.paymentIntents.capture(
+          booking.paymentIntentId,
+        );
         booking.paymentStatus = "captured";
         console.log(`Payment captured for parcel delivery ${bookingId}`);
       } catch (paymentError) {
@@ -1127,8 +1169,13 @@ exports.completeParcelDelivery = async (req, res) => {
         {
           status: "available",
           currentRide: null,
+          $inc: {
+            totalRides: 1,
+            totalEarning: parseFloat((booking.totalFare * 0.8).toFixed(2)),
+            walletBalance: parseFloat((booking.totalFare * 0.8).toFixed(2)),
+          },
         },
-        { new: true }
+        { new: true },
       );
 
       console.log(`Driver ${riderId} status updated to available`);
@@ -1137,11 +1184,15 @@ exports.completeParcelDelivery = async (req, res) => {
     }
 
     try {
-      await pusher.trigger(`parcel-delivery-${bookingId}`, "delivery-status-update", {
-        bookingId: bookingId,
-        status: "completed",
-        timestamp: new Date().toISOString(),
-      });
+      await pusher.trigger(
+        `parcel-delivery-${bookingId}`,
+        "delivery-status-update",
+        {
+          bookingId: bookingId,
+          status: "completed",
+          timestamp: new Date().toISOString(),
+        },
+      );
 
       await pusher.trigger("driver-status", "driver-available", {
         driverId: riderId,
@@ -1173,8 +1224,6 @@ exports.completeParcelDelivery = async (req, res) => {
     });
   }
 };
-
-// Location Tracking Endpoints
 
 function calculateDistanceFromCoords(lat1, lon1, lat2, lon2) {
   const R = 6371; // Earth's radius in km
@@ -1279,7 +1328,7 @@ exports.getParcelDeliveryDriverLocation = async (req, res) => {
 
     const booking = await ParcelBooking.findById(bookingId).populate(
       "driver",
-      "name phoneNumber location profileImage vehicleDetails"
+      "name phoneNumber location profileImage vehicleDetails",
     );
 
     if (!booking) {
@@ -1298,12 +1347,7 @@ exports.getParcelDeliveryDriverLocation = async (req, res) => {
     }
 
     // Check if delivery is active
-    const activeStatuses = [
-      "accepted",
-      "onTheWay",
-      "arrived",
-      "inProgress",
-    ];
+    const activeStatuses = ["accepted", "onTheWay", "arrived", "inProgress"];
     if (!activeStatuses.includes(booking.status)) {
       return res.status(400).json({
         success: false,
@@ -1320,7 +1364,7 @@ exports.getParcelDeliveryDriverLocation = async (req, res) => {
         driverLocation[1],
         driverLocation[0],
         booking.pickupLocation.coordinates[1],
-        booking.pickupLocation.coordinates[0]
+        booking.pickupLocation.coordinates[0],
       );
       const estimatedMinutes = Math.ceil((distance / 30) * 60);
       eta = estimatedMinutes;
@@ -1399,8 +1443,6 @@ exports.getParcelDeliveryLocationHistory = async (req, res) => {
   }
 };
 
-// Supporting Endpoints
-
 exports.getNearbyParcelDeliveries = async (req, res) => {
   try {
     let { latitude, longitude, radius = 20 } = req.query;
@@ -1418,7 +1460,7 @@ exports.getNearbyParcelDeliveries = async (req, res) => {
     radius = Number(radius) * 1000; // Convert to meters
 
     const deliveries = await ParcelBooking.find({
-      status: "pending",
+      status: { $nin: ["completed", "cancelled", "reviewed"] },
       pickupLocation: {
         $near: {
           $geometry: {
@@ -1436,7 +1478,12 @@ exports.getNearbyParcelDeliveries = async (req, res) => {
       const lng = delivery.pickupLocation.coordinates[0];
       const lat = delivery.pickupLocation.coordinates[1];
 
-      const distance = calculateDistanceFromCoords(latitude, longitude, lat, lng);
+      const distance = calculateDistanceFromCoords(
+        latitude,
+        longitude,
+        lat,
+        lng,
+      );
 
       return {
         ...delivery,

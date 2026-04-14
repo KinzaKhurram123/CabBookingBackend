@@ -122,6 +122,31 @@ const riderSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+
+    // Wallet
+    walletBalance: {
+      type: Number,
+      default: 0,
+    },
+
+    pendingEarnings: {
+      type: Number,
+      default: 0,
+    },
+
+    totalWithdrawn: {
+      type: Number,
+      default: 0,
+    },
+
+    // Bank account for withdrawal
+    bankAccount: {
+      accountTitle: { type: String, default: null },
+      accountNumber: { type: String, default: null },
+      bankName: { type: String, default: null },
+      branchCode: { type: String, default: null },
+      isVerified: { type: Boolean, default: false },
+    },
     
     rating: {
       type: Number,

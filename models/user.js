@@ -115,6 +115,30 @@ const UserSchema = new mongoose.Schema(
 
     resetOTP: { type: Number },
     otpExpiry: { type: Date },
+
+    // Referral & Earn
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    referredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    referralCount: {
+      type: Number,
+      default: 0,
+    },
+    walletBalance: {
+      type: Number,
+      default: 0,
+    },
+    totalEarnedFromReferrals: {
+      type: Number,
+      default: 0,
+    },
   },
   { timestamps: true },
 );

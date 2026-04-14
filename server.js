@@ -35,6 +35,9 @@ app.use("/api/webhook", webhookRoutes);
 app.use("/api", require("./routes/rideTypesRoutes"));
 app.use("/api/chats", require("./routes/chatRoutes"));
 app.use("/api/reviews", require("./routes/reviewRoutes"));
+app.use("/api/withdrawal", require("./routes/withdrawalRoutes"));
+app.use("/api/referral", require("./routes/referralRoutes"));
+app.use("/api/support", require("./routes/supportRoutes"));
 
 app.get("/test", (req, res) => {
   res.json({ message: "Backend is alive!" });

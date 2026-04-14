@@ -29,6 +29,16 @@ router.post("/pet_delivery_booking", protect, createPetDeliveryBooking);
 // Get all bookings
 router.get("/get_pet_delivery", getAllPetDeliveryBookings);
 
+// Supporting endpoints (must be before /:id to avoid route conflicts)
+router.get("/nearby", riderProtect, getNearbyPetDeliveries);
+router.get(
+  "/driver/deliveries",
+  protect,
+  riderProtect,
+  getAllPetDeliveriesForDriver,
+);
+router.get("/bookings/cancelled", protect, getCancelledPetDeliveries);
+
 // Get booking by ID
 router.get("/pet_delivery/:id", getPetDeliveryBookingById);
 
@@ -78,14 +88,6 @@ router.get(
 );
 
 // Supporting endpoints
-router.get("/nearby", riderProtect, getNearbyPetDeliveries);
 router.get("/:bookingId/status", protect, getPetDeliveryStatus);
-router.get(
-  "/driver/deliveries",
-  protect,
-  riderProtect,
-  getAllPetDeliveriesForDriver,
-);
-router.get("/bookings/cancelled", protect, getCancelledPetDeliveries);
 
 module.exports = router;

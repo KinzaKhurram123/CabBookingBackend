@@ -1,7 +1,24 @@
 const Review = require("../models/Review");
 const RideBooking = require("../models/rideBooking");
+const ParcelBooking = require("../models/parcelBooking");
+const PetDeliveryBooking = require("../models/petDeliveryBooking");
 const Rider = require("../models/riderModel");
 const User = require("../models/user");
+const mongoose = require("mongoose");
+
+// Helper — find booking from any type
+const findBooking = async (bookingId) => {
+  let booking = await RideBooking.findById(bookingId);
+  if (booking) return { booking, bookingType: "ride" };
+
+  booking = await ParcelBooking.findById(bookingId);
+  if (booking) return { booking, bookingType: "parcel" };
+
+  booking = await PetDeliveryBooking.findById(bookingId);
+  if (booking) return { booking, bookingType: "pet" };
+
+  return { booking: null, bookingType: null };
+};
 
 exports.createReview = async (req, res) => {
   try {
@@ -17,7 +34,7 @@ exports.createReview = async (req, res) => {
       });
     }
 
-    const booking = await RideBooking.findById(bookingId);
+    const { booking, bookingType } = await findBooking(bookingId);
     if (!booking) {
       return res.status(404).json({
         success: false,
@@ -26,8 +43,14 @@ exports.createReview = async (req, res) => {
     }
 
     const isCustomer = booking.user.toString() === userId.toString();
-    const isDriver =
-      booking.driver && booking.driver.toString() === userId.toString();
+
+    // booking.driver stores Rider._id, so find rider by user to compare
+    let isDriver = false;
+    if (booking.driver) {
+      const riderRecord = await Rider.findOne({ user: userId });
+      isDriver = riderRecord && booking.driver.toString() === riderRecord._id.toString();
+    }
+
     const isAdmin = userRole === "admin";
 
     console.log("Authorization check:", {
@@ -73,13 +96,17 @@ exports.createReview = async (req, res) => {
 
     let reviewForId;
     let reviewForType;
+    let driverRiderId = null; // Rider._id for rating update
 
     if (isCustomer) {
-      reviewForId = booking.driver;
+      // Customer reviewing driver — need Rider._id for rating update
+      const driverRider = await Rider.findById(booking.driver);
+      reviewForId = driverRider?.user || booking.driver; // store User._id
+      driverRiderId = booking.driver; // Rider._id for rating update
       reviewForType = "driver";
     } else if (isDriver) {
       reviewForId = booking.user;
-      reviewForType = "customer";
+      reviewForType = "user";
     } else {
       reviewForId = null;
       reviewForType = "unknown";
@@ -97,7 +124,7 @@ exports.createReview = async (req, res) => {
       userId,
       reviewForId,
       reviewForType,
-      driverId: reviewForType === "driver" ? reviewForId : null,
+      driverId: reviewForType === "driver" ? driverRiderId : null,
       rating,
       review: review || "",
       tags: tags || [],
@@ -115,12 +142,12 @@ exports.createReview = async (req, res) => {
           allReviewsForTarget.length
         : rating;
 
-    if (reviewForType === "driver") {
-      await Rider.findByIdAndUpdate(reviewForId, {
-        "driverDetails.rating": averageRating.toFixed(1),
-        "driverDetails.totalReviews": allReviewsForTarget.length,
+    if (reviewForType === "driver" && driverRiderId) {
+      // Update Rider rating using Rider._id
+      await Rider.findByIdAndUpdate(driverRiderId, {
+        rating: parseFloat(averageRating.toFixed(1)),
       });
-    } else if (reviewForType === "customer") {
+    } else if (reviewForType === "user") {
       await User.findByIdAndUpdate(reviewForId, {
         rating: averageRating.toFixed(1),
         totalReviews: allReviewsForTarget.length,
@@ -170,9 +197,13 @@ exports.getReviewByBooking = async (req, res) => {
       });
     }
 
-    const booking = await RideBooking.findById(bookingId);
+    const { booking } = await findBooking(bookingId);
     const isUser = booking?.user.toString() === userId.toString();
-    const isDriver = booking?.driver?.toString() === userId.toString();
+    let isDriver = false;
+    if (booking?.driver) {
+      const riderRecord = await Rider.findOne({ user: userId });
+      isDriver = riderRecord && booking.driver.toString() === riderRecord._id.toString();
+    }
     const isAdmin = req.user.role === "admin";
 
     if (!isUser && !isDriver && !isAdmin) {
@@ -527,7 +558,7 @@ exports.canReview = async (req, res) => {
     const { bookingId } = req.params;
     const userId = req.user._id;
 
-    const booking = await RideBooking.findById(bookingId);
+    const { booking } = await findBooking(bookingId);
     if (!booking) {
       return res.status(404).json({
         success: false,

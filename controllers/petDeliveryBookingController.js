@@ -7,17 +7,15 @@ const pusher = require("../config/pusher");
 
 // Helper function to calculate distance between two coordinates
 function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371; // Earth's radius in km
+  const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
-
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) *
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLon / 2) *
       Math.sin(dLon / 2);
-
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return R * c;
 }
@@ -33,17 +31,54 @@ const calculateEstimatedArrival = (duration, startTime) => {
 };
 
 // Helper function to calculate pet delivery fare
-function calculatePetDeliveryFare(distance, weight_kg, carrier_required, special_instructions) {
-  const baseFare = 5.0; // Base fare in USD
-  const perKmRate = 2.0; // Rate per km
-  const weightSurcharge = weight_kg > 20 ? (weight_kg - 20) * 0.5 : 0; // Extra charge for pets over 20kg
-  const carrierFee = carrier_required ? 10.0 : 0; // Carrier rental fee
-  const specialHandlingFee = special_instructions ? 5.0 : 0; // Special handling fee
-
+function calculatePetDeliveryFare(
+  distance,
+  weight_kg,
+  carrier_required,
+  special_instructions,
+) {
+  const baseFare = 5.0;
+  const perKmRate = 2.0;
+  const weightSurcharge = weight_kg > 20 ? (weight_kg - 20) * 0.5 : 0;
+  const carrierFee = carrier_required ? 10.0 : 0;
+  const specialHandlingFee = special_instructions ? 5.0 : 0;
   const distanceCharge = distance * perKmRate;
-  const totalFare = baseFare + distanceCharge + weightSurcharge + carrierFee + specialHandlingFee;
-
+  const totalFare =
+    baseFare +
+    distanceCharge +
+    weightSurcharge +
+    carrierFee +
+    specialHandlingFee;
   return parseFloat(totalFare.toFixed(2));
+}
+
+// Helper function to normalize dropoff location
+function normalizeDropoffLocation(dropoffLocation) {
+  if (!dropoffLocation) return null;
+
+  // If it's GeoJSON format
+  if (dropoffLocation.type === "Point" && dropoffLocation.coordinates) {
+    const [lng, lat] = dropoffLocation.coordinates;
+    return { lat, lng };
+  }
+
+  // If it's already lat/lng format
+  if (
+    typeof dropoffLocation.lat === "number" &&
+    typeof dropoffLocation.lng === "number"
+  ) {
+    return dropoffLocation;
+  }
+
+  // If lat/lng are strings, convert to numbers
+  if (dropoffLocation.lat && dropoffLocation.lng) {
+    return {
+      lat: parseFloat(dropoffLocation.lat),
+      lng: parseFloat(dropoffLocation.lng),
+    };
+  }
+
+  return null;
 }
 
 exports.createPetDeliveryBooking = async (req, res) => {
@@ -90,9 +125,19 @@ exports.createPetDeliveryBooking = async (req, res) => {
       });
     }
 
-    const dropoffLocation = req.body.dropoffLocation || req.body.dropOffLocation;
+    const dropoffLocationRaw =
+      req.body.dropoffLocation || req.body.dropOffLocation;
+    const normalizedDropoffLocation =
+      normalizeDropoffLocation(dropoffLocationRaw);
 
-    // Calculate fare if not provided
+    if (!normalizedDropoffLocation) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid dropoff location format. Please provide valid coordinates",
+      });
+    }
+
     let fare = req.body.fare || req.body.price || 0;
     if (!fare && req.body.distance) {
       const distance = parseFloat(req.body.distance);
@@ -101,7 +146,7 @@ exports.createPetDeliveryBooking = async (req, res) => {
         distance,
         weight,
         req.body.carrier_required || false,
-        req.body.special_instructions
+        req.body.special_instructions,
       );
     }
 
@@ -120,7 +165,7 @@ exports.createPetDeliveryBooking = async (req, res) => {
           petName: req.body.pet_name,
           petType: req.body.pet_type,
           pickupLocation: JSON.stringify(req.body.pickupLocation),
-          dropLocation: JSON.stringify(dropoffLocation),
+          dropLocation: JSON.stringify(normalizedDropoffLocation),
           fare: fare.toString(),
         },
         confirm: true,
@@ -146,7 +191,7 @@ exports.createPetDeliveryBooking = async (req, res) => {
       owner_name: req.body.owner_name,
       owner_phone: req.body.owner_phone,
       pickupLocation: req.body.pickupLocation,
-      dropoffLocation: dropoffLocation,
+      dropoffLocation: normalizedDropoffLocation,
       pickupLocationName: req.body.pickupLocationName,
       dropoffLocationName: req.body.dropoffLocationName,
       distance: req.body.distance,
@@ -184,7 +229,7 @@ exports.createPetDeliveryBooking = async (req, res) => {
             type: "Point",
             coordinates: pickupCoords,
           },
-          $maxDistance: 20000, // 20km radius
+          $maxDistance: 20000,
         },
       },
       isAvailable: true,
@@ -193,8 +238,39 @@ exports.createPetDeliveryBooking = async (req, res) => {
 
     const estimatedArrival = calculateEstimatedArrival(
       populatedBooking.duration || "30",
-      new Date()
+      new Date(),
     );
+
+    // Pusher — notify all nearby drivers in realtime
+    const pusherPayload = {
+      bookingId: savedBooking._id,
+      type: "pet",
+      status: "pending",
+      pickupLocationName: populatedBooking.pickupLocationName,
+      dropoffLocationName: populatedBooking.dropoffLocationName,
+      fare: populatedBooking.fare,
+      distance: populatedBooking.distance,
+      petName: req.body.pet_name,
+      petType: req.body.pet_type,
+      pickupCoords,
+      timestamp: new Date().toISOString(),
+    };
+
+    // Global pet channel — driver app subscribe kare
+    try {
+      await pusher.trigger("pet-bookings", "new-pet-booking", pusherPayload);
+    } catch (pusherError) {
+      console.error("Pusher global trigger error (non-critical):", pusherError.message);
+    }
+
+    // Individual rider channels
+    for (const rider of nearbyRiders) {
+      try {
+        await pusher.trigger(`rider-${rider._id}`, "new-pet-booking", pusherPayload);
+      } catch (pusherError) {
+        console.error(`Pusher error for rider ${rider._id}:`, pusherError.message);
+      }
+    }
 
     return res.status(201).json({
       success: true,
@@ -232,7 +308,8 @@ exports.createPetDeliveryBooking = async (req, res) => {
     if (error.type === "StripeCardError") {
       return res.status(400).json({
         success: false,
-        message: "Your card was declined. Please use a different payment method.",
+        message:
+          "Your card was declined. Please use a different payment method.",
         error: error.message,
       });
     }
@@ -257,7 +334,6 @@ exports.createPetDeliveryBooking = async (req, res) => {
 exports.getAllPetDeliveryBookings = async (req, res) => {
   try {
     const bookings = await PetDeliveryBooking.find().sort({ created_at: -1 });
-
     res.status(200).json({
       message: "Pet delivery bookings fetched successfully",
       data: bookings,
@@ -273,13 +349,11 @@ exports.getAllPetDeliveryBookings = async (req, res) => {
 exports.getPetDeliveryBookingById = async (req, res) => {
   try {
     const booking = await PetDeliveryBooking.findById(req.params.id);
-
     if (!booking) {
       return res.status(404).json({
         message: "Pet delivery booking not found",
       });
     }
-
     res.status(200).json({
       message: "Booking fetched successfully",
       data: booking,
@@ -291,8 +365,6 @@ exports.getPetDeliveryBookingById = async (req, res) => {
     });
   }
 };
-
-// Advanced Cancellation Endpoints
 
 exports.cancelPetDeliveryBooking = async (req, res) => {
   try {
@@ -337,9 +409,8 @@ exports.cancelPetDeliveryBooking = async (req, res) => {
     if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
       try {
         const cancelledPayment = await stripe.paymentIntents.cancel(
-          booking.paymentIntentId
+          booking.paymentIntentId,
         );
-
         paymentCancellationResult = {
           success: true,
           status: cancelledPayment.status,
@@ -351,7 +422,8 @@ exports.cancelPetDeliveryBooking = async (req, res) => {
         paymentCancellationResult = {
           success: false,
           error: paymentError.message,
-          message: "Payment could not be released automatically. Please contact support.",
+          message:
+            "Payment could not be released automatically. Please contact support.",
         };
       }
     }
@@ -378,7 +450,9 @@ exports.cancelPetDeliveryBooking = async (req, res) => {
           status: "available",
           currentRide: null,
         });
-        console.log(`Booking ${bookingId} cancelled. Driver ${booking.driver} set to available.`);
+        console.log(
+          `Booking ${bookingId} cancelled. Driver ${booking.driver} set to available.`,
+        );
       } catch (driverError) {
         console.error("Driver update error:", driverError.message);
       }
@@ -396,7 +470,6 @@ exports.cancelPetDeliveryBooking = async (req, res) => {
     });
   } catch (error) {
     console.error("Cancel pet delivery error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -447,9 +520,8 @@ exports.driverCancelPetDelivery = async (req, res) => {
     if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
       try {
         const cancelledPayment = await stripe.paymentIntents.cancel(
-          booking.paymentIntentId
+          booking.paymentIntentId,
         );
-
         paymentCancellationResult = {
           success: true,
           status: cancelledPayment.status,
@@ -501,7 +573,6 @@ exports.driverCancelPetDelivery = async (req, res) => {
     });
   } catch (error) {
     console.error("Driver cancel pet delivery error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -531,7 +602,6 @@ exports.adminCancelPetDelivery = async (req, res) => {
       });
     }
 
-    // Cancel payment if exists
     if (booking.paymentIntentId && booking.paymentStatus === "authorized") {
       try {
         await stripe.paymentIntents.cancel(booking.paymentIntentId);
@@ -577,7 +647,6 @@ exports.adminCancelPetDelivery = async (req, res) => {
     });
   } catch (error) {
     console.error("Admin cancel pet delivery error:", error);
-
     return res.status(500).json({
       success: false,
       message: "Internal server error",
@@ -586,19 +655,13 @@ exports.adminCancelPetDelivery = async (req, res) => {
   }
 };
 
-// Driver Workflow Endpoints
-
+// MAIN FIXED FUNCTION - acceptPetDelivery
 exports.acceptPetDelivery = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
   try {
     const bookingId = req.params.bookingId || req.body.bookingId;
     const rider = req.rider;
 
     if (!rider) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(401).json({
         success: false,
         message: "Rider not authenticated. Please login again.",
@@ -606,55 +669,13 @@ exports.acceptPetDelivery = async (req, res) => {
     }
 
     if (!bookingId) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(400).json({
         success: false,
         message: "Booking ID is required",
       });
     }
 
-    const booking = await PetDeliveryBooking.findById(bookingId).session(session);
-
-    if (!booking) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
-    }
-
-    if (booking.user.toString() === rider.user.toString()) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "You cannot accept your own pet delivery booking",
-      });
-    }
-
-    if (booking.status !== "pending") {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: `This delivery is no longer available. Current status: ${booking.status}`,
-      });
-    }
-
-    if (booking.driver) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        message: "This delivery has already been accepted by another driver.",
-      });
-    }
-
-    if (rider.status !== "available") {
-      await session.abortTransaction();
-      session.endSession();
+    if (rider.status === "busy") {
       return res.status(400).json({
         success: false,
         message: `You are not available to accept new deliveries. Current status: ${rider.status}`,
@@ -662,8 +683,6 @@ exports.acceptPetDelivery = async (req, res) => {
     }
 
     if (!rider.isVerified) {
-      await session.abortTransaction();
-      session.endSession();
       return res.status(403).json({
         success: false,
         message: "Your account is not verified yet. Please wait for admin approval.",
@@ -671,17 +690,40 @@ exports.acceptPetDelivery = async (req, res) => {
       });
     }
 
-    booking.status = "accepted";
-    booking.driver = rider._id;
-    booking.acceptedAt = new Date();
-    await booking.save({ session });
+    // Find booking first
+    const existingBooking = await PetDeliveryBooking.findById(bookingId);
 
-    rider.status = "busy";
-    rider.currentRide = booking._id;
-    await rider.save({ session });
+    if (!existingBooking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
 
-    await session.commitTransaction();
-    session.endSession();
+    if (existingBooking.user.toString() === rider.user.toString()) {
+      return res.status(400).json({ success: false, message: "You cannot accept your own booking" });
+    }
+
+    if (existingBooking.status !== "pending") {
+      return res.status(400).json({
+        success: false,
+        message: `This delivery is no longer available. Current status: ${existingBooking.status}`,
+      });
+    }
+
+    if (existingBooking.driver) {
+      return res.status(400).json({ success: false, message: "Already accepted by another driver" });
+    }
+
+    // Direct update — no condition matching issues
+    await PetDeliveryBooking.updateOne(
+      { _id: bookingId },
+      { $set: { status: "accepted", driver: rider._id, acceptedAt: new Date() } }
+    );
+
+    const booking = await PetDeliveryBooking.findById(bookingId);
+
+    // Update rider status
+    await Rider.findByIdAndUpdate(rider._id, {
+      $set: { status: "busy", currentRide: booking._id },
+    });
 
     const populatedBooking = await PetDeliveryBooking.findById(booking._id)
       .populate("user", "name email phoneNumber profileImage")
@@ -694,10 +736,7 @@ exports.acceptPetDelivery = async (req, res) => {
       await pusher.trigger(`pet-delivery-${bookingId}`, "delivery-accepted", {
         bookingId: bookingId,
         status: "accepted",
-        driver: {
-          id: rider._id,
-          name: rider.user?.name,
-        },
+        driver: { id: rider._id, name: rider.user?.name },
         timestamp: new Date().toISOString(),
       });
     } catch (pusherError) {
@@ -709,16 +748,10 @@ exports.acceptPetDelivery = async (req, res) => {
       message: "Pet delivery accepted successfully",
       data: {
         booking: populatedBooking,
-        rider: {
-          id: rider._id,
-          status: rider.status,
-          currentRide: rider.currentRide,
-        },
+        rider: { id: rider._id, status: "busy", currentRide: booking._id },
       },
     });
   } catch (error) {
-    await session.abortTransaction();
-    session.endSession();
     console.error("Accept pet delivery error:", error);
     res.status(500).json({
       success: false,
@@ -731,27 +764,29 @@ exports.acceptPetDelivery = async (req, res) => {
 exports.petDeliveryOnTheWay = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user?._id;
+    const riderId = req.rider?._id;
 
     if (!riderId) {
       return res.status(401).json({
         success: false,
-        message: "User not authenticated",
+        message: "Rider not authenticated",
       });
     }
 
     const booking = await PetDeliveryBooking.findById(bookingId);
     if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
+      return res.status(404).json({ success: false, message: "Booking not found" });
     }
 
     if (!booking.driver || booking.driver.toString() !== riderId.toString()) {
       return res.status(403).json({
         success: false,
         message: "You are not assigned to this delivery",
+        debug: {
+          bookingDriver: booking.driver?.toString() || "null",
+          yourRiderId: riderId?.toString(),
+          bookingStatus: booking.status,
+        },
       });
     }
 
@@ -780,11 +815,15 @@ exports.petDeliveryOnTheWay = async (req, res) => {
     await booking.save();
 
     try {
-      await pusher.trigger(`pet-delivery-${bookingId}`, "delivery-status-update", {
-        bookingId: bookingId,
-        status: "onTheWay",
-        timestamp: new Date().toISOString(),
-      });
+      await pusher.trigger(
+        `pet-delivery-${bookingId}`,
+        "delivery-status-update",
+        {
+          bookingId: bookingId,
+          status: "onTheWay",
+          timestamp: new Date().toISOString(),
+        },
+      );
     } catch (pusherError) {
       console.error("Pusher error (non-critical):", pusherError.message);
     }
@@ -812,7 +851,7 @@ exports.petDeliveryOnTheWay = async (req, res) => {
 exports.petDeliveryReachedPickup = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider?._id;
 
     const booking = await PetDeliveryBooking.findById(bookingId);
     if (!booking) {
@@ -853,11 +892,15 @@ exports.petDeliveryReachedPickup = async (req, res) => {
     await booking.save();
 
     try {
-      await pusher.trigger(`pet-delivery-${bookingId}`, "delivery-status-update", {
-        bookingId: bookingId,
-        status: "arrived",
-        timestamp: new Date().toISOString(),
-      });
+      await pusher.trigger(
+        `pet-delivery-${bookingId}`,
+        "delivery-status-update",
+        {
+          bookingId: bookingId,
+          status: "arrived",
+          timestamp: new Date().toISOString(),
+        },
+      );
     } catch (pusherError) {
       console.error("Pusher error (non-critical):", pusherError.message);
     }
@@ -884,7 +927,7 @@ exports.petDeliveryReachedPickup = async (req, res) => {
 exports.startPetDelivery = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider?._id;
 
     const booking = await PetDeliveryBooking.findById(bookingId);
     if (!booking) {
@@ -926,11 +969,15 @@ exports.startPetDelivery = async (req, res) => {
     await booking.save();
 
     try {
-      await pusher.trigger(`pet-delivery-${bookingId}`, "delivery-status-update", {
-        bookingId: bookingId,
-        status: "inProgress",
-        timestamp: new Date().toISOString(),
-      });
+      await pusher.trigger(
+        `pet-delivery-${bookingId}`,
+        "delivery-status-update",
+        {
+          bookingId: bookingId,
+          status: "inProgress",
+          timestamp: new Date().toISOString(),
+        },
+      );
     } catch (pusherError) {
       console.error("Pusher trigger error:", pusherError);
     }
@@ -958,7 +1005,7 @@ exports.startPetDelivery = async (req, res) => {
 exports.completePetDelivery = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider?._id;
 
     const booking = await PetDeliveryBooking.findById(bookingId);
     if (!booking) {
@@ -997,15 +1044,19 @@ exports.completePetDelivery = async (req, res) => {
       changedAt: new Date(),
     });
 
-    // Capture payment if Card payment
-    if (booking.paymentType === "Card" && booking.paymentIntentId && booking.paymentStatus === "authorized") {
+    if (
+      booking.paymentType === "Card" &&
+      booking.paymentIntentId &&
+      booking.paymentStatus === "authorized"
+    ) {
       try {
-        const paymentIntent = await stripe.paymentIntents.capture(booking.paymentIntentId);
+        const paymentIntent = await stripe.paymentIntents.capture(
+          booking.paymentIntentId,
+        );
         booking.paymentStatus = "captured";
         console.log(`Payment captured for pet delivery ${bookingId}`);
       } catch (paymentError) {
         console.error("Payment capture error:", paymentError.message);
-        // Continue with completion even if payment capture fails
       }
     }
 
@@ -1017,21 +1068,29 @@ exports.completePetDelivery = async (req, res) => {
         {
           status: "available",
           currentRide: null,
+          $inc: {
+            totalRides: 1,
+            totalEarning: parseFloat((booking.totalFare * 0.8).toFixed(2)),
+            walletBalance: parseFloat((booking.totalFare * 0.8).toFixed(2)),
+          },
         },
-        { new: true }
+        { new: true },
       );
-
       console.log(`Driver ${riderId} status updated to available`);
     } catch (driverUpdateError) {
       console.error("Driver status update error:", driverUpdateError.message);
     }
 
     try {
-      await pusher.trigger(`pet-delivery-${bookingId}`, "delivery-status-update", {
-        bookingId: bookingId,
-        status: "completed",
-        timestamp: new Date().toISOString(),
-      });
+      await pusher.trigger(
+        `pet-delivery-${bookingId}`,
+        "delivery-status-update",
+        {
+          bookingId: bookingId,
+          status: "completed",
+          timestamp: new Date().toISOString(),
+        },
+      );
 
       await pusher.trigger("driver-status", "driver-available", {
         driverId: riderId,
@@ -1063,8 +1122,6 @@ exports.completePetDelivery = async (req, res) => {
     });
   }
 };
-
-// Location Tracking Endpoints
 
 exports.updatePetDeliveryDriverLocation = async (req, res) => {
   try {
@@ -1153,7 +1210,7 @@ exports.getPetDeliveryDriverLocation = async (req, res) => {
 
     const booking = await PetDeliveryBooking.findById(bookingId).populate(
       "driver",
-      "name phoneNumber location profileImage vehicleDetails"
+      "name phoneNumber location profileImage vehicleDetails",
     );
 
     if (!booking) {
@@ -1163,7 +1220,6 @@ exports.getPetDeliveryDriverLocation = async (req, res) => {
       });
     }
 
-    // Check if user is the customer of this delivery
     if (booking.user.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -1171,13 +1227,7 @@ exports.getPetDeliveryDriverLocation = async (req, res) => {
       });
     }
 
-    // Check if delivery is active
-    const activeStatuses = [
-      "accepted",
-      "onTheWay",
-      "arrived",
-      "inProgress",
-    ];
+    const activeStatuses = ["accepted", "onTheWay", "arrived", "inProgress"];
     if (!activeStatuses.includes(booking.status)) {
       return res.status(400).json({
         success: false,
@@ -1187,14 +1237,13 @@ exports.getPetDeliveryDriverLocation = async (req, res) => {
 
     const driverLocation = booking.driver?.location?.coordinates || null;
 
-    // Calculate ETA
     let eta = null;
     if (driverLocation && booking.pickupLocation?.coordinates) {
       const distance = calculateDistance(
         driverLocation[1],
         driverLocation[0],
         booking.pickupLocation.coordinates[1],
-        booking.pickupLocation.coordinates[0]
+        booking.pickupLocation.coordinates[0],
       );
       const estimatedMinutes = Math.ceil((distance / 30) * 60);
       eta = estimatedMinutes;
@@ -1244,7 +1293,6 @@ exports.getPetDeliveryLocationHistory = async (req, res) => {
       });
     }
 
-    // Allow access to admin or delivery participants
     const isAdmin = req.user?.role === "admin";
     const isDriver = booking.driver?.toString() === userId?.toString();
     const isCustomer = booking.user?.toString() === userId?.toString();
@@ -1273,8 +1321,6 @@ exports.getPetDeliveryLocationHistory = async (req, res) => {
   }
 };
 
-// Supporting Endpoints
-
 exports.getNearbyPetDeliveries = async (req, res) => {
   try {
     let { latitude, longitude, radius = 20 } = req.query;
@@ -1289,10 +1335,10 @@ exports.getNearbyPetDeliveries = async (req, res) => {
 
     latitude = Number(latitude);
     longitude = Number(longitude);
-    radius = Number(radius) * 1000; // Convert to meters
+    radius = Number(radius) * 1000;
 
     const deliveries = await PetDeliveryBooking.find({
-      status: "pending",
+      status: { $nin: ["completed", "cancelled", "reviewed"] },
       pickupLocation: {
         $near: {
           $geometry: {
@@ -1309,9 +1355,7 @@ exports.getNearbyPetDeliveries = async (req, res) => {
     const result = deliveries.map((delivery) => {
       const lng = delivery.pickupLocation.coordinates[0];
       const lat = delivery.pickupLocation.coordinates[1];
-
       const distance = calculateDistance(latitude, longitude, lat, lng);
-
       return {
         ...delivery,
         distance: distance.toFixed(2) + " km",
