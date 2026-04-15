@@ -11,6 +11,7 @@ const {
   updateRiderProfile,
   updateRiderStatus,
   addCompleteVehicleDetails,
+  getRiderBookingHistory,
   upload,
 } = require("../controllers/riderController");
 const { protect } = require("../middleware/authMiddleware");
@@ -56,5 +57,7 @@ router.get("/onboarding-status", getOnboardingStatus);
 router.put("/profile", updateRiderProfile);
 
 router.put("/status", riderProtect, updateRiderStatus);
+
+router.get("/booking-history", riderProtect, getRiderBookingHistory);
 
 module.exports = router;

@@ -992,3 +992,125 @@ exports.debugDatabase = async (req, res) => {
 };
 
 exports.upload = upload;
+
+// ─── Rider All Bookings History ───────────────────────────────────────────────
+const RideBooking = require("../models/rideBooking");
+const ParcelBooking = require("../models/parcelBooking");
+const PetDeliveryBooking = require("../models/petDeliveryBooking");
+const Review = require("../models/Review");
+
+exports.getRiderBookingHistory = async (req, res) => {
+  try {
+    const riderId = req.rider?._id;
+    if (!riderId) {
+      return res.status(401).json({ success: false, message: "Rider not authenticated" });
+    }
+
+    const {
+      page = 1,
+      limit = 10,
+      status,        // filter by status e.g. completed, cancelled
+      type,          // filter by type: ride | parcel | pet
+    } = req.query;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const lim  = parseInt(limit);
+
+    const statusFilter = status ? { status } : {};
+
+    // ── Fetch all three in parallel ──────────────────────────────────────────
+    const [rides, parcels, pets] = await Promise.all([
+      (!type || type === "ride")
+        ? RideBooking.find({ driver: riderId, ...statusFilter })
+            .select("_id status fare totalFare distance duration pickupLocationName dropoffLocationName createdAt completedAt paymentType paymentStatus user")
+            .populate("user", "name profileImage phoneNumber")
+            .lean()
+        : [],
+      (!type || type === "parcel")
+        ? ParcelBooking.find({ driver: riderId, ...statusFilter })
+            .select("_id status fare totalFare distance duration pickupLocationName dropoffLocationName createdAt completedAt paymentType paymentStatus user")
+            .populate("user", "name profileImage phoneNumber")
+            .lean()
+        : [],
+      (!type || type === "pet")
+        ? PetDeliveryBooking.find({ driver: riderId, ...statusFilter })
+            .select("_id status fare totalFare distance duration pickupLocationName dropoffLocationName createdAt completedAt paymentType paymentStatus user pet_name pet_type")
+            .populate("user", "name profileImage phoneNumber")
+            .lean()
+        : [],
+    ]);
+
+    // ── Tag each booking with its type ───────────────────────────────────────
+    const taggedRides   = rides.map(b   => ({ ...b, bookingType: "ride" }));
+    const taggedParcels = parcels.map(b => ({ ...b, bookingType: "parcel" }));
+    const taggedPets    = pets.map(b    => ({ ...b, bookingType: "pet" }));
+
+    // ── Merge & sort by createdAt desc ───────────────────────────────────────
+    const all = [...taggedRides, ...taggedParcels, ...taggedPets].sort(
+      (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+    );
+
+    const total      = all.length;
+    const paginated  = all.slice(skip, skip + lim);
+
+    // ── Attach reviews for completed bookings ────────────────────────────────
+    const completedIds = paginated
+      .filter(b => b.status === "completed")
+      .map(b => b._id);
+
+    const reviews = completedIds.length
+      ? await Review.find({ bookingId: { $in: completedIds }, isDeleted: false })
+          .select("bookingId rating review reviewForType tags createdAt")
+          .lean()
+      : [];
+
+    const reviewMap = {};
+    reviews.forEach(r => {
+      reviewMap[r.bookingId.toString()] = r;
+    });
+
+    const result = paginated.map(b => ({
+      ...b,
+      review: reviewMap[b._id.toString()] || null,
+    }));
+
+    // ── Summary stats ────────────────────────────────────────────────────────
+    const completed  = all.filter(b => b.status === "completed");
+    const totalEarnings = completed.reduce((sum, b) => {
+      const fare = parseFloat(b.totalFare || b.fare || 0);
+      return sum + (isNaN(fare) ? 0 : fare * 0.8); // 80% rider share
+    }, 0);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        bookings: result,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: lim,
+          totalPages: Math.ceil(total / lim),
+        },
+        summary: {
+          total,
+          completed: completed.length,
+          cancelled: all.filter(b => b.status === "cancelled").length,
+          pending:   all.filter(b => b.status === "pending").length,
+          totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+          byType: {
+            ride:   taggedRides.length,
+            parcel: taggedParcels.length,
+            pet:    taggedPets.length,
+          },
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Get rider booking history error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
