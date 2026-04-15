@@ -23,7 +23,7 @@ const findBooking = async (bookingId) => {
 exports.createReview = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const { rating, review, tags } = req.body;
+    const { rating, review, tags, driverId: bodyDriverId } = req.body;
     const userId = req.user._id;
     const userRole = req.user.role;
 
@@ -42,24 +42,38 @@ exports.createReview = async (req, res) => {
       });
     }
 
-    const isCustomer = booking.user.toString() === userId.toString();
+    // isCustomer: booking.user matches, OR booking.user is null but user is NOT the driver
+    const riderRecord = await Rider.findOne({ user: userId });
+    const isActualDriver = !!(riderRecord && booking.driver &&
+      booking.driver.toString() === riderRecord._id.toString());
 
-    // booking.driver stores Rider._id, so find rider by user to compare
-    let isDriver = false;
-    if (booking.driver) {
-      const riderRecord = await Rider.findOne({ user: userId });
-      isDriver = riderRecord && booking.driver.toString() === riderRecord._id.toString();
+    // booking.user match kare toh customer — isActualDriver se zyada priority
+    // Also: if bodyDriverId is provided and current user is NOT that driver, treat as customer
+    let isCustomer;
+    if (booking.user) {
+      isCustomer = booking.user.toString() === userId.toString();
+    } else if (bodyDriverId) {
+      // Frontend ne driverId bheja — agar current user woh driver nahi toh customer hai
+      isCustomer = !isActualDriver;
+    } else {
+      isCustomer = !isActualDriver;
     }
+
+    // Driver sirf tab maano jab customer nahi ho
+    const isDriver = !isCustomer && isActualDriver;
 
     const isAdmin = userRole === "admin";
 
     console.log("Authorization check:", {
       isCustomer,
       isDriver,
+      isActualDriver,
       isAdmin,
-      bookingUser: booking.user.toString(),
-      bookingDriver: booking.driver?.toString(),
+      bookingUser: booking.user?.toString() || "NULL",
+      bookingDriver: booking.driver?.toString() || "NULL",
       currentUser: userId.toString(),
+      riderRecordId: riderRecord?._id?.toString() || "NO RIDER RECORD",
+      bodyDriverId: bodyDriverId || "NOT PROVIDED",
     });
 
     if (!isCustomer && !isDriver && !isAdmin) {
@@ -67,7 +81,7 @@ exports.createReview = async (req, res) => {
         success: false,
         message: "You are not authorized to review this ride",
         debug: {
-          bookingUser: booking.user.toString(),
+          bookingUser: booking.user?.toString(),
           bookingDriver: booking.driver?.toString(),
           yourId: userId.toString(),
         },
@@ -100,30 +114,39 @@ exports.createReview = async (req, res) => {
 
     if (isCustomer) {
       // Customer reviewing driver — need Rider._id for rating update
-      const driverRider = await Rider.findById(booking.driver);
-      reviewForId = driverRider?.user || booking.driver; // store User._id
-      driverRiderId = booking.driver; // Rider._id for rating update
+      const driverObjectId = booking.driver || (bodyDriverId ? new mongoose.Types.ObjectId(bodyDriverId) : null);
+      if (!driverObjectId) {
+        return res.status(400).json({
+          success: false,
+          message: "No driver assigned to this booking. Cannot submit review.",
+        });
+      }
+      const driverRider = await Rider.findById(driverObjectId);
+      reviewForId = driverRider?.user || driverObjectId;
+      driverRiderId = driverObjectId;
       reviewForType = "driver";
     } else if (isDriver) {
-      reviewForId = booking.user;
+      // Driver reviewing customer
+      reviewForId = booking.user || null;
       reviewForType = "user";
     } else {
       reviewForId = null;
       reviewForType = "unknown";
     }
 
-    if (!reviewForId) {
+    if (!reviewForId && reviewForType !== "user") {
       return res.status(400).json({
         success: false,
         message: "Cannot determine review target",
       });
     }
 
+    // Driver reviewing but no user on booking — skip user rating update, still save review
     const newReview = await Review.create({
       bookingId,
       userId,
-      reviewForId,
-      reviewForType,
+      reviewForId: reviewForId || userId, // fallback to reviewer's own ID to satisfy required field
+      reviewForType: reviewForType === "unknown" ? "user" : reviewForType,
       driverId: reviewForType === "driver" ? driverRiderId : null,
       rating,
       review: review || "",

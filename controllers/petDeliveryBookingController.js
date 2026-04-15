@@ -697,7 +697,11 @@ exports.acceptPetDelivery = async (req, res) => {
       return res.status(404).json({ success: false, message: "Booking not found" });
     }
 
-    if (existingBooking.user.toString() === rider.user.toString()) {
+    if (
+      existingBooking.user &&
+      rider.user &&
+      existingBooking.user.toString() === rider.user.toString()
+    ) {
       return res.status(400).json({ success: false, message: "You cannot accept your own booking" });
     }
 
@@ -797,22 +801,27 @@ exports.petDeliveryOnTheWay = async (req, res) => {
       });
     }
 
-    booking.status = "onTheWay";
-    booking.onTheWayAt = new Date();
+    await PetDeliveryBooking.updateOne(
+      { _id: bookingId },
+      {
+        $set: {
+          status: "onTheWay",
+          onTheWayAt: new Date(),
+        },
+        $push: {
+          statusHistory: {
+            status: "onTheWay",
+            changedBy: riderId,
+            userRole: "driver",
+            reason: "Driver is on the way to pickup location",
+            changedAt: new Date(),
+          },
+        },
+      }
+    );
 
-    if (!booking.statusHistory) {
-      booking.statusHistory = [];
-    }
-
-    booking.statusHistory.push({
-      status: "onTheWay",
-      changedBy: riderId,
-      userRole: "driver",
-      reason: "Driver is on the way to pickup location",
-      changedAt: new Date(),
-    });
-
-    await booking.save();
+    // Refresh booking for response
+    const updatedBooking = await PetDeliveryBooking.findById(bookingId);
 
     try {
       await pusher.trigger(
@@ -832,9 +841,9 @@ exports.petDeliveryOnTheWay = async (req, res) => {
       success: true,
       message: "Driver is on the way to pickup",
       booking: {
-        id: booking._id,
-        status: booking.status,
-        onTheWayAt: booking.onTheWayAt,
+        id: updatedBooking._id,
+        status: updatedBooking.status,
+        onTheWayAt: updatedBooking.onTheWayAt,
       },
       timestamp: new Date().toISOString(),
     });
@@ -886,10 +895,11 @@ exports.petDeliveryReachedPickup = async (req, res) => {
       });
     }
 
-    booking.status = "arrived";
-    booking.arrivedAt = new Date();
-
-    await booking.save();
+    const arrivedAt = new Date();
+    await PetDeliveryBooking.updateOne(
+      { _id: bookingId },
+      { $set: { status: "arrived", arrivedAt } }
+    );
 
     try {
       await pusher.trigger(
@@ -910,8 +920,8 @@ exports.petDeliveryReachedPickup = async (req, res) => {
       message: "Driver reached pickup location",
       booking: {
         id: booking._id,
-        status: booking.status,
-        arrivedAt: booking.arrivedAt,
+        status: "arrived",
+        arrivedAt,
       },
     });
   } catch (error) {
@@ -951,22 +961,22 @@ exports.startPetDelivery = async (req, res) => {
       });
     }
 
-    booking.status = "inProgress";
-    booking.startedAt = new Date();
-
-    if (!booking.statusHistory) {
-      booking.statusHistory = [];
-    }
-
-    booking.statusHistory.push({
-      status: "inProgress",
-      changedBy: riderId,
-      userRole: "driver",
-      reason: "Pet delivery started",
-      changedAt: new Date(),
-    });
-
-    await booking.save();
+    const startedAt = new Date();
+    await PetDeliveryBooking.updateOne(
+      { _id: bookingId },
+      {
+        $set: { status: "inProgress", startedAt },
+        $push: {
+          statusHistory: {
+            status: "inProgress",
+            changedBy: riderId,
+            userRole: "driver",
+            reason: "Pet delivery started",
+            changedAt: new Date(),
+          },
+        },
+      }
+    );
 
     try {
       await pusher.trigger(
@@ -987,8 +997,8 @@ exports.startPetDelivery = async (req, res) => {
       message: "Pet delivery started successfully",
       booking: {
         id: booking._id,
-        status: booking.status,
-        startedAt: booking.startedAt,
+        status: "inProgress",
+        startedAt,
       },
       timestamp: new Date().toISOString(),
     });
@@ -1029,20 +1039,8 @@ exports.completePetDelivery = async (req, res) => {
       });
     }
 
-    booking.status = "completed";
-    booking.completedAt = new Date();
-
-    if (!booking.statusHistory) {
-      booking.statusHistory = [];
-    }
-
-    booking.statusHistory.push({
-      status: "completed",
-      changedBy: riderId,
-      userRole: "driver",
-      reason: "Pet delivery completed",
-      changedAt: new Date(),
-    });
+    const completedAt = new Date();
+    let finalPaymentStatus = booking.paymentStatus;
 
     if (
       booking.paymentType === "Card" &&
@@ -1050,17 +1048,33 @@ exports.completePetDelivery = async (req, res) => {
       booking.paymentStatus === "authorized"
     ) {
       try {
-        const paymentIntent = await stripe.paymentIntents.capture(
-          booking.paymentIntentId,
-        );
-        booking.paymentStatus = "captured";
+        await stripe.paymentIntents.capture(booking.paymentIntentId);
+        finalPaymentStatus = "captured";
         console.log(`Payment captured for pet delivery ${bookingId}`);
       } catch (paymentError) {
         console.error("Payment capture error:", paymentError.message);
       }
     }
 
-    await booking.save();
+    await PetDeliveryBooking.updateOne(
+      { _id: bookingId },
+      {
+        $set: {
+          status: "completed",
+          completedAt,
+          paymentStatus: finalPaymentStatus,
+        },
+        $push: {
+          statusHistory: {
+            status: "completed",
+            changedBy: riderId,
+            userRole: "driver",
+            reason: "Pet delivery completed",
+            changedAt: new Date(),
+          },
+        },
+      }
+    );
 
     try {
       await Rider.findOneAndUpdate(
@@ -1106,9 +1120,9 @@ exports.completePetDelivery = async (req, res) => {
       message: "Pet delivery completed successfully",
       booking: {
         id: booking._id,
-        status: booking.status,
-        completedAt: booking.completedAt,
-        paymentStatus: booking.paymentStatus,
+        status: "completed",
+        completedAt,
+        paymentStatus: finalPaymentStatus,
       },
       driverStatus: "available",
       timestamp: new Date().toISOString(),
@@ -1159,21 +1173,26 @@ exports.updatePetDeliveryDriverLocation = async (req, res) => {
       lastLocationUpdate: new Date(),
     });
 
-    if (!booking.locationHistory) {
-      booking.locationHistory = [];
-    }
-    booking.locationHistory.push({
+    const newLocationEntry = {
       location: {
         type: "Point",
         coordinates: [longitude, latitude],
       },
       timestamp: new Date(),
-    });
+    };
 
-    if (booking.locationHistory.length > 100) {
-      booking.locationHistory.shift();
-    }
-    await booking.save();
+    // Keep only last 100 entries — use $push with $slice
+    await PetDeliveryBooking.updateOne(
+      { _id: bookingId },
+      {
+        $push: {
+          locationHistory: {
+            $each: [newLocationEntry],
+            $slice: -100,
+          },
+        },
+      }
+    );
 
     const channelName = `pet-delivery-${bookingId}`;
     pusher.trigger(channelName, "driver-location-update", {
