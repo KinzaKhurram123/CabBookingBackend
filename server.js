@@ -100,3 +100,20 @@ server.listen(
   () => console.log(`Server running on port ${PORT}`),
   console.log(`✅ Stripe initialized`),
 );
+
+
+db.riders?.updateOne(
+  { _id: ObjectId("69e1f6346bb93efa827a450f") },
+  {
+    $set: {
+      isVerified: true,
+      verificationStatus: "approved",
+      status: "active",
+      verifiedAt: new Date(),
+      "documents.license.status": "approved",
+      "documents.insurance.status": "approved",
+      "documents.profilePhoto.status": "approved",
+      "documents.vehicleRegistration.status": "approved"
+    }
+  }
+)

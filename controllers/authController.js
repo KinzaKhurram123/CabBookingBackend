@@ -5,12 +5,15 @@ const { applyReferralCode } = require("./referralController");
 const crypto = require("crypto");
 
 const generateReferralCode = (userId) => {
-  return "REF" + crypto
-    .createHash("sha256")
-    .update(userId.toString())
-    .digest("hex")
-    .toUpperCase()
-    .slice(0, 8);
+  return (
+    "REF" +
+    crypto
+      .createHash("sha256")
+      .update(userId.toString())
+      .digest("hex")
+      .toUpperCase()
+      .slice(0, 8)
+  );
 };
 
 exports.registerUser = async (req, res) => {
@@ -146,6 +149,11 @@ exports.loginUser = async (req, res) => {
 
     const userResponse = user.toObject();
     delete userResponse.password;
+
+    // ✅ IMPORTANT: Agar customer hai to driverDetails hatao
+    if (user.role !== "driver") {
+      delete userResponse.driverDetails;
+    }
 
     let responseData = {
       success: true,

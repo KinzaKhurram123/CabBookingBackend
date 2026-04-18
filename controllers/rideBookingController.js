@@ -8,8 +8,36 @@ const { chargeCard } = require("./paymentController");
 const stripe = require("../config/stripe");
 const pusher = require("../config/pusher");
 
+// function calculateDistance(lat1, lon1, lat2, lon2) {
+//   const R = 6371;
+//   const dLat = ((lat2 - lat1) * Math.PI) / 180;
+//   const dLon = ((lon2 - lon1) * Math.PI) / 180;
+
+//   const a =
+//     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+//     Math.cos((lat1 * Math.PI) / 180) *
+//       Math.cos((lat2 * Math.PI) / 180) *
+//       Math.sin(dLon / 2) *
+//       Math.sin(dLon / 2);
+
+//   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+//   return R * c;
+// }
+
 function calculateDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371;
+  // Ensure numbers
+  lat1 = parseFloat(lat1);
+  lon1 = parseFloat(lon1);
+  lat2 = parseFloat(lat2);
+  lon2 = parseFloat(lon2);
+
+  // Validate
+  if (isNaN(lat1) || isNaN(lon1) || isNaN(lat2) || isNaN(lon2)) {
+    return 0;
+  }
+
+  const R = 6371; // Earth radius in KM
+
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
 
@@ -21,7 +49,8 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
       Math.sin(dLon / 2);
 
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
+
+  return Number((R * c).toFixed(2)); // clean output
 }
 
 const calculateEstimatedArrival = (duration, startTime) => {
@@ -197,14 +226,24 @@ exports.createRideBooking = async (req, res) => {
     try {
       await pusher.trigger("ride-bookings", "new-ride-booking", pusherPayload);
     } catch (pusherError) {
-      console.error("Pusher trigger error (non-critical):", pusherError.message);
+      console.error(
+        "Pusher trigger error (non-critical):",
+        pusherError.message,
+      );
     }
 
     for (const rider of nearbyRiders) {
       try {
-        await pusher.trigger(`rider-${rider._id}`, "new-ride-booking", pusherPayload);
+        await pusher.trigger(
+          `rider-${rider._id}`,
+          "new-ride-booking",
+          pusherPayload,
+        );
       } catch (pusherError) {
-        console.error(`Pusher error for rider ${rider._id}:`, pusherError.message);
+        console.error(
+          `Pusher error for rider ${rider._id}:`,
+          pusherError.message,
+        );
       }
     }
 
@@ -275,32 +314,98 @@ exports.createRideBooking = async (req, res) => {
   }
 };
 
+// exports.getNearbyRides = async (req, res) => {
+//   try {
+//     console.log("req.query:", req.query);
+//     console.log("req.body:", req.body);
+
+//     let { latitude, longitude, radius = 5 } = req.query;
+
+//     if (!latitude || !longitude) {
+//       return res.status(400).json({
+//         message: "latitude & longitude required",
+//         debug: { query: req.query, body: req.body },
+//       });
+//     }
+
+//     latitude = Number(latitude);
+//     longitude = Number(longitude);
+//     radius = Number(radius) * 1000;
+
+//     console.log("User:", latitude, longitude);
+
+//     const rides = await RideBooking.find({
+//       pickupLocation: {
+//         $near: {
+//           $geometry: {
+//             type: "Point",
+//             coordinates: [longitude, latitude],
+//           },
+//           $maxDistance: radius,
+//         },
+//       },
+//     })
+//       .populate("user")
+//       .lean();
+
+//     console.log("Found rides:", rides.length);
+
+//     const result = rides.map((ride) => {
+//       const lng = ride.pickupLocation.coordinates[0];
+//       const lat = ride.pickupLocation.coordinates[1];
+
+//       const distance = calculateDistance(latitude, longitude, lat, lng);
+//       console.log(distance, "distanceeeeeeeeee");
+
+//       return {
+//         ...ride,
+//         distance: distance.toFixed(2) + " km",
+//       };
+//     });
+
+//     res.json({
+//       success: true,
+//       count: result.length,
+//       rides: result,
+//     });
+//   } catch (err) {
+//     console.log(err);
+//     res.status(500).json({
+//       error: err.message,
+//     });
+//   }
+// };
+
 exports.getNearbyRides = async (req, res) => {
   try {
-    console.log("req.query:", req.query);
-    console.log("req.body:", req.body);
-
     let { latitude, longitude, radius = 5 } = req.query;
 
     if (!latitude || !longitude) {
       return res.status(400).json({
+        success: false,
         message: "latitude & longitude required",
-        debug: { query: req.query, body: req.body },
       });
     }
 
-    latitude = Number(latitude);
-    longitude = Number(longitude);
-    radius = Number(radius) * 1000;
+    latitude = parseFloat(latitude);
+    longitude = parseFloat(longitude);
+    radius = parseFloat(radius) * 1000; // meters
 
-    console.log("User:", latitude, longitude);
+    if (isNaN(latitude) || isNaN(longitude)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid coordinates",
+      });
+    }
+
+    console.log("User Location:", latitude, longitude);
 
     const rides = await RideBooking.find({
       pickupLocation: {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [longitude, latitude],
+            coordinates: [longitude, latitude], // ✅ correct
           },
           $maxDistance: radius,
         },
@@ -311,17 +416,11 @@ exports.getNearbyRides = async (req, res) => {
 
     console.log("Found rides:", rides.length);
 
-    const result = rides.map((ride) => {
-      const lng = ride.pickupLocation.coordinates[0];
-      const lat = ride.pickupLocation.coordinates[1];
-
-      const distance = calculateDistance(latitude, longitude, lat, lng);
-
-      return {
-        ...ride,
-        distance: distance.toFixed(2) + " km",
-      };
-    });
+    // ✅ No calculation — just return DB data
+    const result = rides.map((ride) => ({
+      ...ride,
+      distance: ride.distance ? `${ride.distance} km` : null,
+    }));
 
     res.json({
       success: true,
@@ -329,8 +428,9 @@ exports.getNearbyRides = async (req, res) => {
       rides: result,
     });
   } catch (err) {
-    console.log(err);
+    console.error(err);
     res.status(500).json({
+      success: false,
       error: err.message,
     });
   }
