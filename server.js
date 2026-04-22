@@ -26,6 +26,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/users", require("./routes/userRoutes"));
 app.use("/api/ride", require("./routes/rideBookingRoutes"));
+app.use("/api/rides", require("./routes/rideBookingRoutes")); // Alias for /api/ride
 app.use("/api/rider", require("./routes/riderRoutes"));
 app.use("/api-docs", swaggerUI.serve, swaggerUI.setup(swaggerSpec));
 app.use("/api/parcel", require("./routes/percelBookingRoutes"));
@@ -38,6 +39,7 @@ app.use("/api/reviews", require("./routes/reviewRoutes"));
 app.use("/api/withdrawal", require("./routes/withdrawalRoutes"));
 app.use("/api/referral", require("./routes/referralRoutes"));
 app.use("/api/support", require("./routes/supportRoutes"));
+app.use("/api/stripe-connect", require("./routes/stripeConnectRoutes"));
 
 app.get("/test", (req, res) => {
   res.json({ message: "Backend is alive!" });
@@ -100,20 +102,3 @@ server.listen(
   () => console.log(`Server running on port ${PORT}`),
   console.log(`✅ Stripe initialized`),
 );
-
-
-db.riders?.updateOne(
-  { _id: ObjectId("69e1f6346bb93efa827a450f") },
-  {
-    $set: {
-      isVerified: true,
-      verificationStatus: "approved",
-      status: "active",
-      verifiedAt: new Date(),
-      "documents.license.status": "approved",
-      "documents.insurance.status": "approved",
-      "documents.profilePhoto.status": "approved",
-      "documents.vehicleRegistration.status": "approved"
-    }
-  }
-)

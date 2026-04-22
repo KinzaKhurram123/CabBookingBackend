@@ -147,7 +147,44 @@ const riderSchema = new mongoose.Schema(
       branchCode: { type: String, default: null },
       isVerified: { type: Boolean, default: false },
     },
-    
+
+    // Stripe Connect fields
+    stripeConnectAccountId: {
+      type: String,
+      default: null,
+    },
+
+    connectAccountStatus: {
+      type: String,
+      enum: ['not_started', 'pending', 'enabled', 'disabled', 'rejected'],
+      default: 'not_started',
+    },
+
+    connectOnboardingComplete: {
+      type: Boolean,
+      default: false,
+    },
+
+    connectDetailsSubmitted: {
+      type: Boolean,
+      default: false,
+    },
+
+    connectChargesEnabled: {
+      type: Boolean,
+      default: false,
+    },
+
+    connectPayoutsEnabled: {
+      type: Boolean,
+      default: false,
+    },
+
+    connectAccountCreatedAt: {
+      type: Date,
+      default: null,
+    },
+
     rating: {
       type: Number,
       default: 5,

@@ -21,6 +21,7 @@ const {
   getLocationHistory,
   getDriverLocation,
   updateDriverLocation,
+  estimateFare,
 } = require("../controllers/rideBookingController");
 const { protect, authorize } = require("../middleware/authMiddleware");
 const { riderProtect } = require("../middleware/riderAuthMiddleware");
@@ -34,15 +35,17 @@ const {
   getPaymentStatus,
 } = require("../controllers/paymentController");
 
+router.post("/estimate-fare", protect, estimateFare);
 router.post("/ridebook", protect, createRideBooking);
 router.get("/nearby", getNearbyRides);
 router.get("/all_rides", getAllRides);
 router.get("/ride_history/:userId", getUserRideHistory);
-router.get("/all_rides_status", protect, getAllRidesForDriver);
+router.get("/all_rides_status", protect, riderProtect, getAllRidesForDriver);
 router.put("/bookings/:bookingId/cancel", protect, cancelRideBooking);
 router.put(
   "/driver/bookings/:bookingId/cancel",
   protect,
+  riderProtect,
   driverCancelRideBooking,
 );
 router.put(
@@ -56,7 +59,7 @@ router.put("/:bookingId/on-the-way", protect, riderProtect, riderOnTheWay);
 router.put("/:bookingId/reached-pickup", protect, riderProtect, reachedPickup);
 router.put("/:bookingId/start", protect, riderProtect, startRide);
 router.put("/:bookingId/complete", protect, riderProtect, completeRide);
-router.get("/:bookingId/status", protect, riderProtect, getRideStatus);
+router.get("/:bookingId/status", protect, getRideStatus);
 
 router.post("/payment/setup", protect, setupPaymentMethod);
 router.get("/payment/cards", protect, getUserCards);

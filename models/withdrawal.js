@@ -10,7 +10,8 @@ const withdrawalSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
-      min: [100, "Minimum withdrawal amount is 100"],
+      min: 100,
+      max: 10000,
     },
     status: {
       type: String,
@@ -18,21 +19,49 @@ const withdrawalSchema = new mongoose.Schema(
       default: "pending",
     },
     bankAccount: {
-      accountTitle: { type: String },
-      accountNumber: { type: String },
-      bankName: { type: String },
-      branchCode: { type: String },
+      accountTitle: String,
+      accountNumber: String,
+      bankName: String,
+      branchCode: String,
+      iban: String,
     },
-    rejectionReason: { type: String, default: null },
-    processedAt: { type: Date, default: null },
+    rejectionReason: {
+      type: String,
+      default: null,
+    },
+    note: {
+      type: String,
+      default: null,
+    },
+    transactionId: {
+      type: String,
+      default: null,
+    },
     processedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       default: null,
     },
-    note: { type: String, default: null },
+    processedAt: {
+      type: Date,
+      default: null,
+    },
+    requestedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    paidAt: {
+      type: Date,
+      default: null,
+    },
   },
-  { timestamps: true },
+  {
+    timestamps: true,
+  },
 );
+
+withdrawalSchema.index({ rider: 1, status: 1, createdAt: -1 });
+withdrawalSchema.index({ status: 1, createdAt: -1 });
+withdrawalSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("Withdrawal", withdrawalSchema);

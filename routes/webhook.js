@@ -4,6 +4,7 @@ const stripe = require("../config/stripe");
 const RideBooking = require("../models/rideBooking");
 const parcelBooking = require("../models/parcelBooking");
 const petDeliveryBooking = require("../models/petDeliveryBooking");
+const Rider = require("../models/riderModel");
 
 router.post(
   "/stripe-webhook",
@@ -93,6 +94,55 @@ router.post(
           );
         }
         break;
+
+      case "account.updated":
+        const account = event.data.object;
+        const rider = await Rider.findOne({ stripeConnectAccountId: account.id });
+
+        if (rider) {
+          rider.connectDetailsSubmitted = account.details_submitted;
+          rider.connectChargesEnabled = account.charges_enabled;
+          rider.connectPayoutsEnabled = account.payouts_enabled;
+          rider.connectOnboardingComplete = account.details_submitted && account.charges_enabled;
+          rider.connectAccountStatus = account.charges_enabled ? 'enabled' : 'pending';
+          await rider.save();
+          console.log(
+            `✅ Connect account updated for rider ${rider._id}: status=${rider.connectAccountStatus}`,
+          );
+        }
+        break;
+
+      case "account.application.deauthorized":
+        const deauthorizedAccountId = event.account;
+        const deauthorizedRider = await Rider.findOne({ stripeConnectAccountId: deauthorizedAccountId });
+
+        if (deauthorizedRider) {
+          deauthorizedRider.connectAccountStatus = 'disabled';
+          deauthorizedRider.connectChargesEnabled = false;
+          deauthorizedRider.connectPayoutsEnabled = false;
+          await deauthorizedRider.save();
+          console.log(
+            `⚠️ Connect account deauthorized for rider ${deauthorizedRider._id}`,
+          );
+        }
+        break;
+
+      case "payout.paid":
+        const paidPayout = event.data.object;
+        console.log(
+          `💵 Payout paid: ${paidPayout.id} - Amount: ${paidPayout.amount / 100} ${paidPayout.currency}`,
+        );
+        break;
+
+      case "payout.failed":
+        const failedPayout = event.data.object;
+        console.log(
+          `❌ Payout failed: ${failedPayout.id} - ${failedPayout.failure_message}`,
+        );
+        break;
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
     }
 
     res.json({ received: true });

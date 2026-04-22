@@ -1,1795 +1,2389 @@
-# Cab Booking Backend - Complete API Documentation
+﻿# RideLynk API Documentation
 
-## Base URL
-```
-http://localhost:5000/api
-```
+Base URL: https://backend.ridelynk.com
 
----
-
-## 📋 Table of Contents
-1. [Authentication APIs](#authentication-apis)
-2. [User APIs](#user-apis)
-3. [Rider/Driver APIs](#riderdriver-apis)
-4. [Ride Booking APIs](#ride-booking-apis)
-5. [Payment APIs](#payment-apis)
-6. [Review APIs](#review-apis)
-7. [Chat APIs](#chat-apis)
-8. [Parcel Booking APIs](#parcel-booking-apis)
-9. [Pet Delivery Booking APIs](#pet-delivery-booking-apis)
-10. [Admin APIs](#admin-apis)
-11. [Ride Types APIs](#ride-types-apis)
-12. [Webhook APIs](#webhook-apis)
+> Protected routes require Header: Authorization: Bearer TOKEN
 
 ---
 
-## 🔐 Authentication APIs
+## 1. AUTH APIs  /api/auth
 
-### 1. Register User
-**POST** `/auth/register`
+### POST /api/auth/register
+Register a new customer user.
 
-**Required Fields:**
-- `name` (string) - User's full name
-- `email` (string) - Valid email address
-- `password` (string) - User password
-- `phoneNumber` (string) - Phone number with country code
-
-**Optional Fields:**
-- `role` (string) - User role (default: "user")
-
-**Body:**
-```json
+Body:
 {
   "name": "John Doe",
   "email": "john@example.com",
-  "password": "password123",
-  "phoneNumber": "+1234567890",
-  "role": "user"
+  "password": "12345678",
+  "phoneNumber": "03001234567",
+  "role": "customer"
 }
-```
 
-### 2. Register Driver
-**POST** `/auth/register/driver`
-
-**Required Fields:**
-- `name` (string) - Driver's full name
-- `email` (string) - Valid email address
-- `password` (string) - Driver password
-- `phoneNumber` (string) - Phone number with country code
-
-**Optional Fields:**
-- `city` (string) - Driver's city
-- `country` (string) - Driver's country
-
-**Body:**
-```json
+Response 201:
 {
-  "name": "Driver Name",
-  "email": "driver@example.com",
-  "password": "password123",
-  "phoneNumber": "+1234567890",
-  "city": "New York",
-  "country": "USA"
+  "_id": "userId",
+  "name": "John Doe",
+  "email": "john@example.com",
+  "role": "customer",
+  "token": "JWT_TOKEN"
 }
-```
 
-### 3. Login User
-**POST** `/auth/login`
+---
 
-**Required Fields:**
-- `email` (string) - User's email address
-- `password` (string) - User's password
+### POST /api/auth/register/driver
+Register a new driver account.
 
-**Body:**
-```json
+Body:
+{
+  "name": "James Driver",
+  "email": "james@example.com",
+  "password": "12345678",
+  "phoneNumber": "03001234567",
+  "city": "Karachi",
+  "country": "Pakistan"
+}
+
+Response 201:
+{
+  "success": true,
+  "message": "Driver account created successfully.",
+  "data": {
+    "user": { "_id", "name", "email", "role": "driver" },
+    "token": "JWT_TOKEN",
+    "onboardingRequired": true
+  }
+}
+
+---
+
+### POST /api/auth/login
+Login for both customer and driver.
+
+Body:
 {
   "email": "john@example.com",
-  "password": "password123"
+  "password": "12345678"
 }
-```
 
-### 4. Forget Password
-**POST** `/auth/forget_password`
+Response 200:
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "user": { "_id", "name", "email", "role", "phoneNumber", "profileImage" },
+    "token": "JWT_TOKEN"
+  }
+}
 
-**Required Fields:**
-- `email` (string) - User's registered email address
+---
 
-**Body:**
-```json
+### POST /api/auth/forget_password
+Send OTP to email for password reset.
+
+Body:
 {
   "email": "john@example.com"
 }
-```
 
-**Response:**
-```json
+Response 200:
 {
   "message": "OTP sent to your email",
-  "otp": "123456"
+  "otp": 123456
 }
-```
 
-### 5. Check OTP
-**POST** `/auth/checkOTP`
+---
 
-**Required Fields:**
-- `email` (string) - User's email address
-- `code` (string) - 6-digit OTP code
+### POST /api/auth/checkOTP
+Verify OTP code.
 
-**Body:**
-```json
+Body:
 {
   "email": "john@example.com",
   "code": "123456"
 }
-```
 
-### 6. Reset Password
-**POST** `/auth/reset_password`
+Response 200:
+{
+  "message": "OTP verified successfully"
+}
 
-**Required Fields:**
-- `email` (string) - User's email address
-- `password` (string) - New password
-- `confirmpassword` (string) - Confirm new password (must match password)
+---
 
-**Body:**
-```json
+### POST /api/auth/reset_password
+Reset password after OTP verification.
+
+Body:
 {
   "email": "john@example.com",
   "password": "newpassword123",
   "confirmpassword": "newpassword123"
 }
-```
 
-### 7. Get Profile
-**POST** `/auth/get_profile`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Note:** Uses authenticated user's ID from token. No body required.
-
-### 8. Update Profile
-**POST** `/auth/edit_profile`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Optional Fields:**
-- `name` (string) - Updated name
-- `phoneNumber` (string) - Updated phone number
-- `email` (string) - Updated email
-- `password` (string) - New password (if changing password)
-
-**Body:**
-```json
+Response 200:
 {
-  "name": "Updated Name",
-  "phoneNumber": "+1234567890",
-  "email": "newemail@example.com",
-  "password": "newpassword123"
+  "message": "Reset Password Successfully"
 }
-```
 
 ---
 
-## 👤 User APIs
+### POST /api/auth/edit_profile  [Protected]
+Update user profile.
 
-### 1. Get User Profile
-**GET** `/users/profile`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
----
-
-## 🚗 Rider/Driver APIs
-
-### 1. Add Vehicle Details
-**POST** `/rider/vehicle-details`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Optional Fields (at least one required):**
-- `category` (string) - Vehicle category (e.g., "ride", "delivery")
-- `vehicleType` (string) - Type of vehicle (e.g., "sedan", "suv")
-- `make` (string) - Vehicle manufacturer
-- `model` (string) - Vehicle model
-- `year` (number) - Vehicle year
-- `color` (string) - Vehicle color
-- `licensePlate` (string) - License plate number
-- `vehicleNumber` (string) - Alternative vehicle number
-
-**Body:**
-```json
+Body:
 {
-  "category": "ride",
+  "name": "New Name",
+  "phoneNumber": "03001234567",
+  "email": "newemail@example.com"
+}
+
+Response 200:
+{
+  "_id": "userId",
+  "name": "New Name",
+  "email": "newemail@example.com",
+  "token": "NEW_JWT_TOKEN"
+}
+
+---
+
+### POST /api/auth/get_profile  [Protected]
+Get current user profile.
+
+Body: none
+
+Response 200:
+{
+  "_id": "userId",
+  "name": "John Doe",
+  "email": "john@example.com",
+  "role": "customer",
+  "phoneNumber": "03001234567",
+  "profileImage": "url",
+  "walletBalance": 0,
+  "referralCode": "REFABC123"
+}
+
+
+---
+
+## 2. USER APIs  /api/users
+
+### GET /api/users/profile  [Protected]
+Get logged in user full profile.
+
+Headers: Authorization: Bearer TOKEN
+
+Response 200:
+{
+  "_id": "userId",
+  "name": "John Doe",
+  "email": "john@example.com",
+  "phoneNumber": "03001234567",
+  "role": "customer",
+  "profileImage": "url",
+  "walletBalance": 0,
+  "referralCode": "REFABC123",
+  "referralCount": 0,
+  "createdAt": "2024-01-15T10:00:00.000Z"
+}
+
+---
+
+## 3. RIDER ONBOARDING APIs  /api/rider
+
+All routes require: Authorization: Bearer TOKEN (driver account)
+
+### POST /api/rider/vehicle-details
+Add vehicle details.
+
+Body:
+{
+  "category": "cab",
   "vehicleType": "sedan",
   "make": "Toyota",
   "model": "Camry",
-  "year": 2020,
+  "year": "2022",
   "color": "Black",
-  "licensePlate": "ABC123"
+  "licensePlate": "ABC-123",
+  "vehicleNumber": "VH123456"
 }
-```
 
-### 2. Upload License
-**POST** `/rider/upload-license`
+Response 200:
+{
+  "success": true,
+  "message": "Vehicle details added successfully",
+  "data": { ...vehicleDetails }
+}
 
-**Headers:**
-```
-Authorization: Bearer <token>
-Content-Type: multipart/form-data
-```
+---
 
-**Required Fields:**
-- `frontImage` (file) - Front image of driver's license (max 5MB)
-- `backImage` (file) - Back image of driver's license (max 5MB)
-- `licenseNumber` (string) - Driver's license number
-- `expiryDate` (date) - License expiry date (YYYY-MM-DD format)
+### POST /api/rider/upload-license
+Upload driving license images.
 
-**Body (Form Data):**
-```
-frontImage: <file>
-backImage: <file>
-licenseNumber: "DL123456"
-expiryDate: "2025-12-31"
-```
+Form-Data (multipart):
+- frontImage: file
+- backImage: file
+- licenseNumber: "DL123456"
+- expiryDate: "2026-12-31"
 
-### 3. Upload Insurance
-**POST** `/rider/upload-insurance`
+Response 200:
+{
+  "success": true,
+  "message": "License uploaded successfully",
+  "data": { "license": { "status": "pending", "frontImage": "url", "backImage": "url" } }
+}
 
-**Headers:**
-```
-Authorization: Bearer <token>
-Content-Type: multipart/form-data
-```
+---
 
-**Required Fields:**
-- `insurance` (file) - Insurance document (PDF/Image, max 10MB)
-- `provider` (string) - Insurance provider name
-- `policyNumber` (string) - Insurance policy number
-- `expiryDate` (date) - Insurance expiry date (YYYY-MM-DD or DD-MM-YYYY)
+### POST /api/rider/upload-insurance
+Upload insurance document.
 
-**Body (Form Data):**
-```
-insurance: <file>
-provider: "State Farm"
-policyNumber: "INS123456"
-expiryDate: "2025-12-31"
-```
+Form-Data (multipart):
+- insurance: file
+- provider: "ABC Insurance"
+- policyNumber: "INS123456"
+- expiryDate: "2025-12-31"
 
-### 4. Upload Profile Photo
-**POST** `/rider/upload-profile-photo`
+Response 200:
+{
+  "success": true,
+  "message": "Insurance uploaded successfully"
+}
 
-**Headers:**
-```
-Authorization: Bearer <token>
-Content-Type: multipart/form-data
-```
+---
 
-**Body (Form Data):**
-```
-profilePhoto: <file>
-```
+### POST /api/rider/upload-profile-photo
+Upload driver profile photo.
 
-### 5. Add Complete Vehicle Details
-**POST** `/rider/add-complete-vehicle-details`
+Form-Data (multipart):
+- profilePhoto: file
 
-**Headers:**
-```
-Authorization: Bearer <token>
-Content-Type: multipart/form-data
-```
+Response 200:
+{
+  "success": true,
+  "message": "Profile photo uploaded successfully",
+  "data": { "profilePhoto": { "url": "cloudinary_url", "status": "pending" } }
+}
 
-**Required Fields:**
-- `category` (string) - Vehicle category (e.g., "ride", "delivery")
-- `make` (string) - Vehicle manufacturer
-- `model` (string) - Vehicle model
-- `year` (number) - Vehicle year
-- `licensePlate` or `vehicleNumber` (string) - Vehicle license plate number
+---
 
-**Optional Fields:**
-- `vehiclePhoto` (file) - Photo of the vehicle
-- `registrationDocument` (file) - Vehicle registration document
-- `subcategoryId` (string) - Subcategory ID
-- `subcategoryName` (string) - Subcategory name (e.g., "Sedan", "SUV")
-- `color` (string) - Vehicle color
-- `registrationNumber` (string) - Registration number
+### POST /api/rider/add-complete-vehicle-details
+Add vehicle with photos.
 
-**Body (Form Data):**
-```
-vehiclePhoto: <file>
-registrationDocument: <file>
-category: "ride"
-subcategoryName: "Sedan"
-make: "Toyota"
-model: "Camry"
-year: 2020
-color: "Black"
-licensePlate: "ABC123"
-registrationNumber: "REG123456"
-```
+Form-Data (multipart):
+- vehiclePhoto: file
+- registrationDocument: file
+- category: "cab"
+- vehicleType: "sedan"
+- make: "Toyota"
+- model: "Camry"
+- year: "2022"
+- color: "Black"
+- licensePlate: "ABC-123"
 
-### 6. Accept Terms
-**POST** `/rider/accept-terms`
+Response 200:
+{
+  "success": true,
+  "message": "Vehicle details added successfully"
+}
 
-**Headers:**
-```
-Authorization: Bearer <token>
-```
+---
 
-**Required Fields:**
-- `accepted` (boolean) - Must be true to accept terms
+### POST /api/rider/accept-terms
+Accept terms and conditions.
 
-**Body:**
-```json
+Body:
 {
   "accepted": true
 }
-```
 
-### 7. Submit for Verification
-**POST** `/rider/submit-verification`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Note:** No request body required. This endpoint submits the driver's profile for admin verification.
-
-**Prerequisites:**
-- Vehicle details must be complete
-- Driver's license uploaded
-- Insurance document uploaded
-- Profile photo uploaded
-- Terms and conditions accepted
-
-### 8. Get Onboarding Status
-**GET** `/rider/onboarding-status`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 9. Update Rider Profile
-**PUT** `/rider/profile`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Optional Fields:**
-- `name` (string) - Updated name
-- `email` (string) - Updated email
-- `phoneNumber` (string) - Updated phone number
-- `address` (string) - Address
-- `city` (string) - City
-- `vehicleType` (string) - Vehicle type
-- `vehicleNumber` (string) - Vehicle number
-- `make` (string) - Vehicle make
-- `model` (string) - Vehicle model
-- `year` (number) - Vehicle year
-- `color` (string) - Vehicle color
-- `emergencyContact` (object) - Emergency contact details
-  - `name` (string) - Contact name
-  - `phone` (string) - Contact phone
-  - `relation` (string) - Relationship
-
-**Body:**
-```json
+Response 200:
 {
-  "name": "Updated Name",
-  "phoneNumber": "+1234567890",
-  "email": "newemail@example.com",
-  "address": "123 New Street",
-  "city": "New York",
-  "emergencyContact": {
-    "name": "Jane Doe",
-    "phone": "+0987654321",
-    "relation": "Spouse"
+  "success": true,
+  "message": "Terms accepted successfully"
+}
+
+---
+
+### POST /api/rider/submit-verification
+Submit all documents for admin verification.
+
+Body: none
+
+Response 200:
+{
+  "success": true,
+  "message": "Verification submitted. Admin will review your documents.",
+  "verificationStatus": "in_review"
+}
+
+---
+
+### GET /api/rider/onboarding-status  [Protected]
+Get current onboarding completion status.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "vehicleDetails": true,
+    "license": true,
+    "insurance": false,
+    "profilePhoto": true,
+    "termsAccepted": false,
+    "verificationStatus": "pending",
+    "isVerified": false
   }
 }
-```
 
-### 10. Update Rider Status
-**PUT** `/rider/status`
+---
 
-**Headers:**
-```
-Authorization: Bearer <token>
-```
+### PUT /api/rider/profile  [Protected]
+Update rider profile.
 
-**Required Fields:**
-- `status` (string) - Driver status ("available" or "offline")
+Body:
+{
+  "phoneNumber": "03001234567",
+  "address": "123 Main St",
+  "city": "Karachi",
+  "emergencyContact": {
+    "name": "Jane Doe",
+    "phone": "03009876543",
+    "relation": "Wife"
+  }
+}
 
-**Body:**
-```json
+Response 200:
+{
+  "success": true,
+  "message": "Profile updated successfully"
+}
+
+---
+
+### PUT /api/rider/status  [Protected + RiderProtect]
+Update rider availability status.
+
+Body:
 {
   "status": "available"
 }
-```
+Status options: available | busy | offline
 
-**Note:** Driver must be verified to set status to "available".
-
----
-
-## 🚕 Ride Booking APIs
-
-### 1. Create Ride Booking
-**POST** `/rides/ridebook`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `category` (string) - Ride category (e.g., "ride", "delivery")
-- `pickupLocation` (object) - Pickup location coordinates
-  - `type` (string) - Must be "Point"
-  - `coordinates` (array) - [longitude, latitude]
-- `dropoffLocation` or `dropOffLocation` (object) - Dropoff location coordinates
-  - `type` (string) - Must be "Point"
-  - `coordinates` (array) - [longitude, latitude]
-- `selectedVehicle` (object) - Selected vehicle details
-  - `id` or `vehicleId` (string) - Vehicle type ID
-  - `name` (string) - Vehicle name (e.g., "Economy", "Premium")
-  - `features` (array) - Vehicle features
-  - `capacity` (number) - Passenger capacity
-
-**Optional Fields:**
-- `pickupLocationName` (string) - Pickup address
-- `dropoffLocationName` (string) - Dropoff address
-- `fare` (number) - Calculated fare
-- `price` (number) - Price
-- `distance` (number) - Distance in km
-- `time` (string) - Estimated time
-- `duration` (string) - Duration in minutes
-- `paymentMethod` (string) - "Card" or "Cash" (default: "Cash")
-- `date` (string) - Booking date
-- `notes` (string) - Additional notes
-
-**Body:**
-```json
-{
-  "category": "ride",
-  "pickupLocation": {
-    "type": "Point",
-    "coordinates": [-74.0060, 40.7128]
-  },
-  "pickupLocationName": "123 Main St, New York",
-  "dropoffLocation": {
-    "type": "Point",
-    "coordinates": [-73.9352, 40.7306]
-  },
-  "dropoffLocationName": "456 Oak Ave, Brooklyn",
-  "selectedVehicle": {
-    "id": "vehicle_type_id",
-    "name": "Economy",
-    "features": ["AC", "Music"],
-    "capacity": 4,
-    "price": "25.50"
-  },
-  "fare": 25.50,
-  "distance": 8.5,
-  "duration": "20",
-  "paymentMethod": "Card",
-  "notes": "Please call when you arrive"
-}
-```
-
-### 2. Get Nearby Rides
-**GET** `/rides/nearby`
-
-**Query Parameters:**
-```
-?latitude=40.7128&longitude=-74.0060&radius=5000
-```
-
-### 3. Get All Rides
-**GET** `/rides/all_rides`
-
-### 4. Get User Ride History
-**GET** `/rides/ride_history/:userId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 5. Get All Rides for Driver
-**GET** `/rides/all_rides_status`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 6. Cancel Ride Booking (User)
-**PUT** `/rides/bookings/:bookingId/cancel`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Optional Fields:**
-- `cancellationReason` (string) - Reason for cancellation
-- `cancelledBy` (string) - Who cancelled (default: "user")
-
-**Body:**
-```json
-{
-  "cancellationReason": "Change of plans",
-  "cancelledBy": "user"
-}
-```
-
-### 7. Cancel Ride Booking (Driver)
-**PUT** `/rides/driver/bookings/:bookingId/cancel`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Optional Fields:**
-- `cancellationReason` (string) - Reason for cancellation
-
-**Body:**
-```json
-{
-  "cancellationReason": "Vehicle issue"
-}
-```
-
-### 8. Cancel Ride Booking (Admin)
-**PUT** `/rides/admin/bookings/:bookingId/cancel`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Optional Fields:**
-- `cancellationReason` (string) - Reason for cancellation
-
-**Body:**
-```json
-{
-  "cancellationReason": "Policy violation"
-}
-```
-
-### 9. Get Cancelled Bookings
-**GET** `/rides/bookings/cancelled`
-
-### 10. Accept Ride
-**POST** `/rides/accept/:bookingId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Note:** No request body required. The bookingId is passed as a URL parameter.
-
-**URL Parameters:**
-- `bookingId` (string) - The ID of the booking to accept
-
-### 11. Rider On The Way
-**PUT** `/rides/:bookingId/on-the-way`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `currentLocation` (object) - Driver's current location
-  - `type` (string) - Must be "Point"
-  - `coordinates` (array) - [longitude, latitude]
-
-**Body:**
-```json
-{
-  "currentLocation": {
-    "type": "Point",
-    "coordinates": [-74.0060, 40.7128]
-  }
-}
-```
-
-### 12. Reached Pickup
-**PUT** `/rides/:bookingId/reached-pickup`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Note:** No request body required. This endpoint marks that the driver has reached the pickup location.
-
-### 13. Start Ride
-**PUT** `/rides/:bookingId/start`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Note:** No request body required. This endpoint marks the ride as started.
-
-### 14. Complete Ride
-**PUT** `/rides/:bookingId/complete`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Note:** No request body required. This endpoint marks the ride as completed and makes the driver available again.
-
-### 15. Get Ride Status
-**GET** `/rides/:bookingId/status`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 16. Update Driver Location
-**PUT** `/rides/:bookingId/update-location`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `latitude` (number) - Current latitude
-- `longitude` (number) - Current longitude
-
-**Body:**
-```json
-{
-  "latitude": 40.7128,
-  "longitude": -74.0060
-}
-```
-
-### 17. Get Driver Location
-**GET** `/rides/:bookingId/track`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 18. Get Location History
-**GET** `/rides/:bookingId/location-history`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 19. Fix Booking Status
-**PUT** `/rides/fix-booking-status/:bookingId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
----
-
-## 💳 Payment APIs
-
-### 1. Setup Payment Method
-**POST** `/rides/payment/setup`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Note:** This endpoint creates a Stripe SetupIntent for adding a payment method. No body required.
-
-**Response:**
-```json
+Response 200:
 {
   "success": true,
-  "clientSecret": "seti_xxxxx_secret_xxxxx",
-  "customerId": "cus_xxxxx"
+  "message": "Status updated",
+  "status": "available"
 }
-```
-
-### 2. Get User Cards
-**GET** `/rides/payment/cards`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 3. Set Default Card
-**PUT** `/rides/payment/default-card`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `paymentMethodId` (string) - Stripe payment method ID
-
-**Body:**
-```json
-{
-  "paymentMethodId": "pm_1234567890"
-}
-```
-
-### 4. Remove Card
-**DELETE** `/rides/payment/card/:paymentMethodId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 5. Get Payment Status
-**GET** `/rides/payment/status/:bookingId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
 
 ---
 
-## ⭐ Review APIs
+### GET /api/rider/booking-history  [Protected + RiderProtect]
+Get all bookings for the logged in driver.
 
-### 1. Create Review
-**POST** `/reviews/:bookingId/create`
+Response 200:
+{
+  "success": true,
+  "data": [ ...bookings ]
+}
 
-**Headers:**
-```
-Authorization: Bearer <token>
-```
 
-**Required Fields:**
-- `rating` (number) - Rating from 1 to 5
+---
 
-**Optional Fields:**
-- `review` (string) - Review text/comment
-- `tags` (array) - Review tags (e.g., ["Friendly", "On Time"])
+## 4. RIDE BOOKING APIs  /api/ride
 
-**Body:**
-```json
+### POST /api/ride/ridebook  [Protected]
+Create a new cab ride booking.
+
+Body:
+{
+  "category": "cab",
+  "pickupLocation": {
+    "type": "Point",
+    "coordinates": [67.0011, 24.8607]
+  },
+  "dropoffLocation": { "lat": 24.9765, "lng": 67.0892 },
+  "pickupLocationName": "Saddar, Karachi",
+  "dropoffLocationName": "North Karachi, Karachi",
+  "fare": "50",
+  "price": "50",
+  "distance": "5.2",
+  "duration": "18",
+  "time": "18 mins",
+  "date": "2024-01-15",
+  "paymentMethod": "Cash",
+  "selectedVehicle": {
+    "id": "vehicle_1",
+    "name": "Economy",
+    "features": "AC, 4 Seats",
+    "capacity": 4,
+    "price": "50"
+  }
+}
+
+Response 201:
+{
+  "success": true,
+  "message": "Ride booked successfully",
+  "booking": {
+    "_id": "bookingId",
+    "status": "pending",
+    "fare": "50",
+    "distance": "5.2",
+    "pickupLocationName": "Saddar, Karachi",
+    "dropoffLocationName": "North Karachi, Karachi",
+    "paymentType": "Cash",
+    "selectedVehicle": { ... }
+  },
+  "nearbyRiders": [ ... ]
+}
+
+---
+
+### GET /api/ride/nearby
+Get nearby pending rides (for drivers).
+
+Query Params:
+- latitude: 24.8607
+- longitude: 67.0011
+- radius: 5  (km, default 5)
+
+Response 200:
+{
+  "success": true,
+  "count": 3,
+  "rides": [
+    {
+      "_id": "bookingId",
+      "status": "pending",
+      "pickupLocationName": "...",
+      "dropoffLocationName": "...",
+      "fare": "50",
+      "distance": "2.50 km"
+    }
+  ]
+}
+
+---
+
+### GET /api/ride/all_rides
+Get all rides (admin).
+
+Query Params:
+- status: pending | accepted | completed | cancelled
+- category: cab | bike
+- startDate: 2024-01-01
+- endDate: 2024-12-31
+- page: 1
+- limit: 100
+
+Response 200:
+{
+  "success": true,
+  "count": 10,
+  "total": 100,
+  "rides": [ ...rides ]
+}
+
+---
+
+### GET /api/ride/ride_history/:userId
+Get complete ride history for a user (cab + parcel + pet).
+
+Params: userId
+
+Query Params:
+- type: cab | parcel | pet
+- status: pending | completed | cancelled
+- page: 1
+- limit: 20
+
+Response 200:
+{
+  "success": true,
+  "summary": {
+    "total": 5,
+    "cab": 2,
+    "parcel": 2,
+    "pet": 1,
+    "completed": 3,
+    "cancelled": 1,
+    "pending": 0,
+    "active": 1
+  },
+  "pagination": { "total": 5, "page": 1, "limit": 20, "totalPages": 1 },
+  "data": [
+    {
+      "id": "bookingId",
+      "type": "cab",
+      "status": "completed",
+      "fare": "50",
+      "distance": "5.20 km",
+      "duration": "18 mins",
+      "pickup": { "name": "Saddar", "coordinates": { "lat": 24.86, "lng": 67.00 } },
+      "dropoff": { "name": "North Karachi", "coordinates": { "lat": 24.97, "lng": 67.08 } },
+      "user": { "id", "name", "email", "phone", "profileImage" },
+      "driver": {
+        "id", "name", "phone", "profileImage",
+        "rating": 4.8,
+        "totalRides": 120,
+        "vehicle": { "make": "Toyota", "model": "Camry", "color": "Black", "licensePlate": "ABC-123" }
+      },
+      "payment": { "method": "Cash", "type": "Cash", "status": "pending" },
+      "timestamps": { "booked", "accepted", "onTheWay", "arrived", "started", "completed" },
+      "statusHistory": [ ... ],
+      "cancellationDetails": null
+    }
+  ]
+}
+
+---
+
+### POST /api/ride/accept/:bookingId  [Protected + RiderProtect]
+Driver accepts a ride.
+
+Params: bookingId
+
+Body: none
+
+Response 200:
+{
+  "success": true,
+  "message": "Ride accepted successfully",
+  "data": {
+    "booking": { "_id", "status": "accepted", "driver": "riderId" },
+    "rider": { "id", "status": "busy", "currentRide": "bookingId" }
+  }
+}
+
+Pusher Event fired on channel ride-{bookingId}:
+Event: ride-status-update
+{
+  "bookingId": "...",
+  "status": "accepted",
+  "booking": { full booking data },
+  "driver": { full driver + vehicle data },
+  "user": { full user data }
+}
+
+---
+
+### PUT /api/ride/:bookingId/on-the-way  [Protected + RiderProtect]
+Driver marks as on the way to pickup.
+
+Body:
+{
+  "currentLocation": { "lat": 24.86, "lng": 67.00 }
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Rider is on the way to pickup",
+  "booking": { "id", "status": "onTheWay", "onTheWayAt": "timestamp" }
+}
+
+Pusher: ride-{bookingId} => ride-status-update { status: "onTheWay", ...full data }
+
+---
+
+### PUT /api/ride/:bookingId/reached-pickup  [Protected + RiderProtect]
+Driver marks as arrived at pickup.
+
+Body: none
+
+Response 200:
+{
+  "success": true,
+  "message": "Rider reached pickup location",
+  "booking": { "id", "status": "arrived", "arrivedAt": "timestamp" }
+}
+
+Pusher: ride-{bookingId} => ride-status-update { status: "arrived", ...full data }
+
+---
+
+### PUT /api/ride/:bookingId/start  [Protected + RiderProtect]
+Driver starts the ride.
+
+Body: none
+
+Response 200:
+{
+  "success": true,
+  "message": "Ride started successfully",
+  "booking": { "id", "status": "inProgress", "startedAt": "timestamp" }
+}
+
+Pusher: ride-{bookingId} => ride-status-update { status: "inProgress", ...full data }
+
+---
+
+### PUT /api/ride/:bookingId/complete  [Protected + RiderProtect]
+Driver completes the ride.
+
+Body: none
+
+Response 200:
+{
+  "success": true,
+  "message": "Ride completed successfully",
+  "booking": { "id", "status": "completed", "completedAt": "timestamp" },
+  "driverStatus": "available"
+}
+
+Pusher: ride-{bookingId} => ride-status-update { status: "completed", ...full data }
+
+---
+
+### PUT /api/ride/bookings/:bookingId/cancel  [Protected]
+User cancels a ride.
+
+Body:
+{
+  "cancellationReason": "Changed my mind",
+  "cancelledBy": "user"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Ride cancelled successfully",
+  "booking": { ...booking, "cancellationDetails": { "cancelledAt", "cancelledBy", "reason" } }
+}
+
+Pusher: ride-{bookingId} => ride-status-update { status: "cancelled", ...full data }
+
+---
+
+### PUT /api/ride/driver/bookings/:bookingId/cancel  [Protected]
+Driver cancels a ride.
+
+Body:
+{
+  "cancellationReason": "Emergency"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Ride cancelled successfully by driver"
+}
+
+---
+
+### GET /api/ride/:bookingId/status  [Protected + RiderProtect]
+Get current ride status with driver location.
+
+Response 200:
+{
+  "success": true,
+  "booking": {
+    "_id", "status", "driver", "user",
+    "riderLocation": { "lat", "lng" },
+    "statusFlow": {
+      "current": "onTheWay",
+      "progress": 40,
+      "timestamps": { "accepted", "onTheWay", "reachedPickup", "started", "completed" }
+    }
+  }
+}
+
+---
+
+### PUT /api/ride/:bookingId/update-location  [Protected + RiderProtect]
+Driver updates live location during ride.
+
+Body:
+{
+  "latitude": 24.8607,
+  "longitude": 67.0011
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Location updated successfully",
+  "data": { "latitude": 24.8607, "longitude": 67.0011, "timestamp": "..." }
+}
+
+Pusher: ride-{bookingId} => driver-location-update
+{
+  "driverId": "...",
+  "latitude": 24.8607,
+  "longitude": 67.0011,
+  "status": "inProgress",
+  "timestamp": "..."
+}
+
+---
+
+### GET /api/ride/:bookingId/track  [Protected]
+Get driver current location for tracking.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "driver": { "name", "phoneNumber", "profileImage", "vehicleDetails" },
+    "currentLocation": { "latitude": 24.86, "longitude": 67.00 },
+    "eta": "5 minutes",
+    "rideStatus": "onTheWay",
+    "lastUpdated": "timestamp"
+  }
+}
+
+---
+
+### GET /api/ride/:bookingId/location-history  [Protected]
+Get full location history of a ride.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "locationHistory": [ { "location": { "coordinates": [lng, lat] }, "timestamp": "..." } ],
+    "totalUpdates": 45
+  }
+}
+
+
+---
+
+## 5. PARCEL DELIVERY APIs  /api/parcel
+
+### POST /api/parcel/create  [Protected]
+Create a new parcel delivery booking.
+
+Body:
+{
+  "receiverName": "Ali Khan",
+  "receiverPhoneNumber": "03001234567",
+  "cargoType": "electronics",
+  "selectedVehicle": "bike",
+  "weight": 2,
+  "height": 10,
+  "length": 20,
+  "numberOfPackages": 1,
+  "fragileItem": true,
+  "pickupLocation": { "lat": 24.8607, "lng": 67.0011 },
+  "dropoffLocation": { "lat": 24.9765, "lng": 67.0892 },
+  "pickupLocationName": "Saddar, Karachi",
+  "dropoffLocationName": "North Karachi, Karachi",
+  "notes": "Handle with care",
+  "parcel_type": "electronics",
+  "paymentMethod": "Cash"
+}
+
+Response 201:
+{
+  "success": true,
+  "message": "Parcel delivery booking created successfully",
+  "booking": {
+    "_id": "bookingId",
+    "status": "pending",
+    "totalFare": 25.5,
+    "distance": "5.2",
+    "estimateTime": "18 minutes"
+  },
+  "nearbyRiders": [ ... ]
+}
+
+Pusher fired on channel parcel-bookings:
+Event: new-parcel-booking { bookingId, type: "parcel", fare, distance, ... }
+
+---
+
+### GET /api/parcel/all
+Get all parcel bookings (admin).
+
+Query Params: status, startDate, endDate, page, limit
+
+Response 200:
+{
+  "success": true,
+  "count": 10,
+  "total": 50,
+  "bookings": [ ...bookings ]
+}
+
+---
+
+### GET /api/parcel/nearby  [RiderProtect]
+Get nearby pending parcel deliveries for driver.
+
+Query Params: latitude, longitude, radius (default 20km)
+
+Response 200:
+{
+  "success": true,
+  "count": 3,
+  "deliveries": [ { ...delivery, "distance": "2.50 km" } ]
+}
+
+---
+
+### GET /api/parcel/:id  [Protected]
+Get parcel booking by ID.
+
+Response 200:
+{
+  "_id": "bookingId",
+  "status": "pending",
+  "receiverName": "Ali Khan",
+  "totalFare": 25.5,
+  ...full booking
+}
+
+---
+
+### POST /api/parcel/accept/:bookingId  [Protected + RiderProtect]
+Driver accepts parcel delivery.
+
+Body: none
+
+Response 200:
+{
+  "success": true,
+  "message": "Parcel delivery accepted successfully",
+  "data": { "booking": { ...full }, "rider": { "id", "status": "busy" } }
+}
+
+Pusher: parcel-delivery-{bookingId} => delivery-accepted { status: "accepted", driver: {...} }
+
+---
+
+### PUT /api/parcel/:bookingId/on-the-way  [Protected + RiderProtect]
+Driver on the way to pickup.
+
+Body: none
+
+Response 200:
+{
+  "success": true,
+  "message": "Driver is on the way to pickup",
+  "booking": { "id", "status": "onTheWay", "onTheWayAt": "timestamp" }
+}
+
+Pusher: parcel-delivery-{bookingId} => delivery-status-update { status: "onTheWay" }
+
+---
+
+### PUT /api/parcel/:bookingId/reached-pickup  [Protected + RiderProtect]
+Driver arrived at pickup.
+
+Response 200:
+{
+  "success": true,
+  "message": "Driver reached pickup location",
+  "booking": { "id", "status": "arrived", "arrivedAt": "timestamp" }
+}
+
+Pusher: parcel-delivery-{bookingId} => delivery-status-update { status: "arrived" }
+
+---
+
+### PUT /api/parcel/:bookingId/start  [Protected + RiderProtect]
+Start parcel delivery.
+
+Response 200:
+{
+  "success": true,
+  "message": "Parcel delivery started successfully",
+  "booking": { "id", "status": "inProgress", "startedAt": "timestamp" }
+}
+
+Pusher: parcel-delivery-{bookingId} => delivery-status-update { status: "inProgress" }
+
+---
+
+### PUT /api/parcel/:bookingId/complete  [Protected + RiderProtect]
+Complete parcel delivery.
+
+Response 200:
+{
+  "success": true,
+  "message": "Parcel delivery completed successfully",
+  "booking": { "id", "status": "completed", "completedAt": "timestamp" },
+  "driverStatus": "available"
+}
+
+Pusher: parcel-delivery-{bookingId} => delivery-status-update { status: "completed" }
+
+---
+
+### PUT /api/parcel/bookings/:bookingId/cancel  [Protected]
+User cancels parcel delivery.
+
+Body:
+{
+  "cancellationReason": "No longer needed"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Parcel delivery cancelled successfully"
+}
+
+---
+
+### GET /api/parcel/:bookingId/status  [Protected]
+Get parcel delivery status.
+
+Response 200:
+{
+  "success": true,
+  "booking": {
+    "_id", "status",
+    "driverLocation": { "lat", "lng" },
+    "statusFlow": { "current": "onTheWay", "progress": 40, "timestamps": {...} }
+  }
+}
+
+---
+
+### PUT /api/parcel/:bookingId/update-location  [Protected + RiderProtect]
+Update driver location during delivery.
+
+Body:
+{
+  "latitude": 24.8607,
+  "longitude": 67.0011
+}
+
+Pusher: parcel-delivery-{bookingId} => driver-location-update { latitude, longitude, timestamp }
+
+---
+
+### GET /api/parcel/:bookingId/track  [Protected]
+Track driver location.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "driver": { "name", "phoneNumber", "vehicleDetails" },
+    "currentLocation": { "latitude", "longitude" },
+    "eta": "5 minutes",
+    "deliveryStatus": "onTheWay"
+  }
+}
+
+---
+
+### GET /api/parcel/driver/deliveries  [Protected + RiderProtect]
+Get all deliveries for logged in driver.
+
+Response 200:
+{
+  "success": true,
+  "count": 5,
+  "deliveries": [ ...deliveries ]
+}
+
+
+---
+
+## 6. PET DELIVERY APIs  /api/pet
+
+### POST /api/pet/pet_delivery_booking  [Protected]
+Create a new pet delivery booking.
+
+Body:
+{
+  "pet_name": "Buddy",
+  "pet_type": "Dog",
+  "breed": "Labrador",
+  "age": "2 years",
+  "weight_kg": "15",
+  "number_of_pets": "1",
+  "carrier_required": true,
+  "is_vaccinated": true,
+  "medical_conditions": "None",
+  "special_instructions": "Handle gently",
+  "length_cm": "60",
+  "width_cm": "40",
+  "height_cm": "50",
+  "owner_name": "John Doe",
+  "owner_phone": "03001234567",
+  "pickupLocation": { "type": "Point", "coordinates": [67.0011, 24.8607] },
+  "dropoffLocation": { "lat": 24.9765, "lng": 67.0892 },
+  "pickupLocationName": "Saddar, Karachi",
+  "dropoffLocationName": "North Karachi, Karachi",
+  "distance": "5.2",
+  "duration": "18",
+  "paymentMethod": "Cash"
+}
+
+Response 201:
+{
+  "success": true,
+  "message": "Pet delivery booking created successfully",
+  "booking": {
+    "_id": "bookingId",
+    "status": "pending",
+    "fare": "35.5",
+    "pet_name": "Buddy",
+    "pet_type": "Dog"
+  },
+  "nearbyRiders": [ ... ]
+}
+
+Pusher fired on channel pet-bookings:
+Event: new-pet-booking { bookingId, type: "pet", petName, petType, fare, ... }
+
+---
+
+### GET /api/pet/get_pet_delivery
+Get all pet delivery bookings (admin).
+
+Response 200:
+{
+  "message": "Pet delivery bookings fetched successfully",
+  "data": [ ...bookings ]
+}
+
+---
+
+### GET /api/pet/nearby  [RiderProtect]
+Get nearby pending pet deliveries for driver.
+
+Query Params: latitude, longitude, radius (default 20km)
+
+Response 200:
+{
+  "success": true,
+  "count": 2,
+  "deliveries": [ { ...delivery, "distance": "3.20 km" } ]
+}
+
+---
+
+### GET /api/pet/pet_delivery/:id
+Get pet delivery booking by ID.
+
+Response 200:
+{
+  "message": "Booking fetched successfully",
+  "data": { ...full booking }
+}
+
+---
+
+### POST /api/pet/accept/:bookingId  [Protected + RiderProtect]
+Driver accepts pet delivery.
+
+Body: none
+
+Response 200:
+{
+  "success": true,
+  "message": "Pet delivery accepted successfully",
+  "data": { "booking": { ...full }, "rider": { "id", "status": "busy" } }
+}
+
+Pusher: pet-delivery-{bookingId} => delivery-accepted { status: "accepted", driver: {...} }
+
+---
+
+### PUT /api/pet/:bookingId/on-the-way  [Protected + RiderProtect]
+Driver on the way to pickup.
+
+Response 200:
+{
+  "success": true,
+  "message": "Driver is on the way to pickup",
+  "booking": { "id", "status": "onTheWay", "onTheWayAt": "timestamp" }
+}
+
+Pusher: pet-delivery-{bookingId} => delivery-status-update { status: "onTheWay" }
+
+---
+
+### PUT /api/pet/:bookingId/reached-pickup  [Protected + RiderProtect]
+Driver arrived at pickup.
+
+Response 200:
+{
+  "success": true,
+  "message": "Driver reached pickup location",
+  "booking": { "id", "status": "arrived" }
+}
+
+Pusher: pet-delivery-{bookingId} => delivery-status-update { status: "arrived" }
+
+---
+
+### PUT /api/pet/:bookingId/start  [Protected + RiderProtect]
+Start pet delivery.
+
+Response 200:
+{
+  "success": true,
+  "message": "Pet delivery started successfully",
+  "booking": { "id", "status": "inProgress", "startedAt": "timestamp" }
+}
+
+Pusher: pet-delivery-{bookingId} => delivery-status-update { status: "inProgress" }
+
+---
+
+### PUT /api/pet/:bookingId/complete  [Protected + RiderProtect]
+Complete pet delivery.
+
+Response 200:
+{
+  "success": true,
+  "message": "Pet delivery completed successfully",
+  "booking": { "id", "status": "completed", "completedAt": "timestamp" },
+  "driverStatus": "available"
+}
+
+Pusher: pet-delivery-{bookingId} => delivery-status-update { status: "completed" }
+
+---
+
+### PUT /api/pet/bookings/:bookingId/cancel  [Protected]
+User cancels pet delivery.
+
+Body:
+{
+  "cancellationReason": "No longer needed"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Pet delivery cancelled successfully"
+}
+
+---
+
+### GET /api/pet/:bookingId/status  [Protected]
+Get pet delivery status.
+
+Response 200:
+{
+  "success": true,
+  "booking": {
+    "_id", "status",
+    "driverLocation": { "lat", "lng" },
+    "statusFlow": { "current": "onTheWay", "progress": 40 }
+  }
+}
+
+---
+
+### PUT /api/pet/:bookingId/update-location  [Protected + RiderProtect]
+Update driver location during pet delivery.
+
+Body:
+{
+  "latitude": 24.8607,
+  "longitude": 67.0011
+}
+
+Pusher: pet-delivery-{bookingId} => driver-location-update { latitude, longitude, timestamp }
+
+---
+
+### GET /api/pet/:bookingId/track  [Protected]
+Track driver location for pet delivery.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "driver": { "name", "phoneNumber", "vehicleDetails" },
+    "currentLocation": { "latitude", "longitude" },
+    "eta": "5 minutes",
+    "deliveryStatus": "onTheWay"
+  }
+}
+
+---
+
+### GET /api/pet/driver/deliveries  [Protected + RiderProtect]
+Get all pet deliveries for logged in driver.
+
+Response 200:
+{
+  "success": true,
+  "count": 3,
+  "deliveries": [ ...deliveries ]
+}
+
+
+---
+
+## 7. CHAT APIs  /api/chats
+
+### POST /api/chats/send  [Protected]
+Send a message in a ride chat.
+
+Body:
+{
+  "rideId": "bookingId",
+  "message": "I am 2 minutes away",
+  "messageType": "text"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": { "_id", "rideId", "sender", "message", "createdAt" }
+}
+
+---
+
+### GET /api/chats/messages/:rideId  [Protected]
+Get all messages for a ride.
+
+Response 200:
+{
+  "success": true,
+  "messages": [
+    { "_id", "sender": { "name", "profileImage" }, "message", "createdAt", "isRead" }
+  ]
+}
+
+---
+
+### PUT /api/chats/read/:rideId  [Protected]
+Mark all messages as read.
+
+Response 200:
+{
+  "success": true,
+  "message": "Messages marked as read"
+}
+
+---
+
+### DELETE /api/chats/message/:messageId  [Protected]
+Delete a message.
+
+Response 200:
+{
+  "success": true,
+  "message": "Message deleted"
+}
+
+---
+
+### POST /api/chats/delivery/send  [Protected]
+Send message for parcel or pet delivery.
+
+Body:
+{
+  "bookingId": "deliveryBookingId",
+  "bookingType": "parcel",
+  "message": "I have picked up the parcel"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": { "_id", "bookingId", "sender", "message", "createdAt" }
+}
+
+---
+
+### GET /api/chats/delivery/:bookingId  [Protected]
+Get messages for parcel or pet delivery.
+
+Query Params: bookingType=parcel or bookingType=pet
+
+Response 200:
+{
+  "success": true,
+  "messages": [ ...messages ]
+}
+
+---
+
+### PUT /api/chats/delivery/read/:bookingId  [Protected]
+Mark delivery messages as read.
+
+Query Params: bookingType=parcel or bookingType=pet
+
+Response 200:
+{
+  "success": true,
+  "message": "Messages marked as read"
+}
+
+---
+
+## 8. REVIEW APIs  /api/reviews
+
+### POST /api/reviews/:bookingId/create  [Protected]
+Create a review for a completed ride.
+
+Body:
 {
   "rating": 5,
-  "review": "Great driver, smooth ride!",
-  "tags": ["Friendly", "Professional", "Clean Car"]
+  "comment": "Excellent driver, very professional",
+  "bookingType": "cab"
 }
-```
 
-### 2. Get Review by Booking
-**GET** `/reviews/booking/:bookingId`
+Response 201:
+{
+  "success": true,
+  "message": "Review created successfully",
+  "review": { "_id", "rating": 5, "comment", "user", "driver", "createdAt" }
+}
 
-**Headers:**
-```
-Authorization: Bearer <token>
-```
+---
 
-### 3. Get Driver Reviews
-**GET** `/reviews/driver/:driverId/reviews`
+### GET /api/reviews/booking/:bookingId  [Protected]
+Get review for a specific booking.
 
-### 4. Get User Reviews
-**GET** `/reviews/user/my-reviews`
+Response 200:
+{
+  "success": true,
+  "review": { "_id", "rating", "comment", "user", "driver", "driverReply" }
+}
 
-**Headers:**
-```
-Authorization: Bearer <token>
-```
+---
 
-### 5. Can Review
-**GET** `/reviews/can-review/:bookingId`
+### GET /api/reviews/driver/:driverId/reviews
+Get all reviews for a driver (public).
 
-**Headers:**
-```
-Authorization: Bearer <token>
-```
+Query Params: page, limit
 
-### 6. Update Review
-**PUT** `/reviews/:reviewId/update`
+Response 200:
+{
+  "success": true,
+  "count": 10,
+  "averageRating": 4.8,
+  "reviews": [ ...reviews ]
+}
 
-**Headers:**
-```
-Authorization: Bearer <token>
-```
+---
 
-**Optional Fields:**
-- `rating` (number) - Updated rating (1-5)
-- `review` (string) - Updated review text
-- `tags` (array) - Updated tags
+### GET /api/reviews/user/my-reviews  [Protected]
+Get all reviews by logged in user.
 
-**Note:** Reviews can only be updated within 24 hours of submission.
+Response 200:
+{
+  "success": true,
+  "reviews": [ ...reviews ]
+}
 
-**Body:**
-```json
+---
+
+### PUT /api/reviews/:reviewId/update  [Protected]
+Update a review.
+
+Body:
 {
   "rating": 4,
-  "review": "Updated review comment",
-  "tags": ["Professional", "On Time"]
+  "comment": "Updated comment"
 }
-```
 
-### 7. Delete Review
-**DELETE** `/reviews/:reviewId/delete`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 8. Driver Reply to Review
-**POST** `/reviews/:reviewId/driver-reply`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `reply` (string) - Driver's reply text (cannot be empty)
-
-**Body:**
-```json
+Response 200:
 {
-  "reply": "Thank you for your feedback!"
+  "success": true,
+  "message": "Review updated successfully"
 }
-```
-
-### 9. Get Review Stats
-**GET** `/reviews/driver/stats`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
 
 ---
 
-## 💬 Chat APIs
+### DELETE /api/reviews/:reviewId/delete  [Protected]
+Delete a review.
 
-### 1. Send Message
-**POST** `/chat/send`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `rideId` (string) - Ride/Booking ID
-- `receiverId` (string) - Receiver's user ID
-- `content` (string) - Message content
-
-**Body:**
-```json
+Response 200:
 {
-  "rideId": "ride_id_here",
-  "receiverId": "receiver_id_here",
-  "content": "Hello, I'm on my way!"
+  "success": true,
+  "message": "Review deleted successfully"
 }
-```
-
-### 2. Get Messages
-**GET** `/chat/messages/:rideId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 3. Mark Messages as Read
-**PUT** `/chat/read/:rideId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 4. Delete Message
-**DELETE** `/chat/message/:messageId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 5. Authenticate Pusher
-**POST** `/chat/pusher/auth`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `socket_id` (string) - Pusher socket ID
-- `channel_name` (string) - Pusher channel name (format: "private-ride-{rideId}")
-
-**Body:**
-```json
-{
-  "socket_id": "socket_id_here",
-  "channel_name": "private-ride-ride_id_here"
-}
-```
-
-### 6. Test Chat
-**GET** `/chat/test`
-
-### 7. Debug Ride Access
-**GET** `/chat/debug/ride/:rideId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 8. Debug Messages
-**GET** `/chat/debug/messages/:rideId`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
 
 ---
 
-## 📦 Parcel Booking APIs
+### POST /api/reviews/:reviewId/driver-reply  [Protected + RiderProtect]
+Driver replies to a review.
 
-### 1. Create Parcel Booking
-**POST** `/parcel/create`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `receiverName` (string) - Receiver's full name
-- `receiverPhoneNumber` (string) - Receiver's phone number
-- `cargoType` (string) - Type of cargo (e.g., "Documents", "Electronics")
-- `selectedVehicle` (string) - Vehicle type ("bike", "car", "van", "truck")
-- `weight` (number) - Package weight in kg
-- `height` (number) - Package height in cm
-- `length` (number) - Package length in cm
-- `numberOfPackages` (number) - Number of packages
-- `pickupLocation` (object) - Pickup location
-  - `lat` (number) - Latitude
-  - `lng` (number) - Longitude
-- `dropoffLocation` (object) - Dropoff location
-  - `lat` (number) - Latitude
-  - `lng` (number) - Longitude
-- `pickupLocationName` (string) - Pickup address
-- `dropoffLocationName` (string) - Dropoff address
-
-**Optional Fields:**
-- `fragileItem` (boolean) - Is item fragile
-- `notes` (string) - Additional notes
-- `parcel_type` (string) - Parcel type
-
-**Body:**
-```json
+Body:
 {
-  "receiverName": "Jane Doe",
-  "receiverPhoneNumber": "+1234567890",
-  "cargoType": "Electronics",
-  "selectedVehicle": "car",
-  "weight": 5,
-  "height": 20,
-  "length": 30,
-  "numberOfPackages": 2,
-  "fragileItem": true,
-  "pickupLocation": {
-    "lat": 40.7128,
-    "lng": -74.0060
-  },
-  "pickupLocationName": "123 Main St, New York",
-  "dropoffLocation": {
-    "lat": 40.7306,
-    "lng": -73.9352
-  },
-  "dropoffLocationName": "456 Oak Ave, Brooklyn",
-  "notes": "Handle with care",
-  "parcel_type": "standard"
+  "reply": "Thank you for your kind words!"
 }
-```
 
-### 2. Get Parcel Booking by ID
-**GET** `/parcel/:id`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-### 3. Cancel Parcel Booking
-**PUT** `/parcel/cancel/:id`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Note:** No request body required. The booking ID is passed as a URL parameter.
+Response 200:
+{
+  "success": true,
+  "message": "Reply added successfully"
+}
 
 ---
 
-## 🐾 Pet Delivery Booking APIs
+### GET /api/reviews/can-review/:bookingId  [Protected]
+Check if user can review a booking.
 
-### 1. Create Pet Delivery Booking
-**POST** `/pet/pet_delivery_booking`
-
-**Headers:**
-```
-Authorization: Bearer <token>
-```
-
-**Required Fields:**
-- `pet_name` (string) - Pet's name
-- `pet_type` (string) - Type of pet (e.g., "dog", "cat")
-- `owner_name` (string) - Owner's full name
-- `owner_phone` (string) - Owner's phone number
-- `pickupLocation` (object) - Pickup location coordinates
-- `dropOffLocation` (object) - Dropoff location coordinates
-- `pickupLocationName` (string) - Pickup address
-- `dropoffLocationName` (string) - Dropoff address
-
-**Optional Fields:**
-- `userId` (string) - User ID (if different from authenticated user)
-
-**Body:**
-```json
+Response 200:
 {
-  "pet_name": "Max",
-  "pet_type": "dog",
-  "owner_name": "John Doe",
-  "owner_phone": "+1234567890",
-  "pickupLocation": {
-    "type": "Point",
-    "coordinates": [-74.0060, 40.7128]
-  },
-  "pickupLocationName": "123 Main St, New York",
-  "dropOffLocation": {
-    "type": "Point",
-    "coordinates": [-73.9352, 40.7306]
-  },
-  "dropoffLocationName": "456 Oak Ave, Brooklyn"
+  "success": true,
+  "canReview": true,
+  "reason": null
 }
-```
 
-### 2. Get All Pet Delivery Bookings
-**GET** `/pet/get_pet_delivery`
-
-### 3. Get Pet Delivery Booking by ID
-**GET** `/pet/pet_delivery/:id`
-
-### 4. Cancel Pet Delivery Booking
-**PUT** `/pet/pet-delivery/:id`
-
-**Note:** No request body required. The booking ID is passed as a URL parameter.
 
 ---
 
-## 👨‍💼 Admin APIs
+## 9. REFERRAL APIs  /api/referral
 
-### 1. Admin Login
-**POST** `/admin/login`
+### GET /api/referral/my-referral  [Protected]
+Get my referral code and stats.
 
-**Required Fields:**
-- `email` (string) - Admin email address
-- `password` (string) - Admin password
-
-**Body:**
-```json
+Response 200:
 {
-  "email": "admin@example.com",
-  "password": "adminpassword123"
-}
-```
-
-### 2. Get Admin Profile
-**GET** `/admin/profile`
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-### 3. Update Admin Profile
-**PUT** `/admin/profile`
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Optional Fields:**
-- `name` (string) - Updated name
-- `email` (string) - Updated email
-- `phoneNumber` (string) - Updated phone number
-
-**Body:**
-```json
-{
-  "name": "Updated Admin Name",
-  "email": "newemail@example.com",
-  "phoneNumber": "+1234567890"
-}
-```
-
-### 4. Change Password
-**PUT** `/admin/change-password`
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Required Fields:**
-- `currentPassword` (string) - Current password
-- `newPassword` (string) - New password
-
-**Body:**
-```json
-{
-  "currentPassword": "oldpassword123",
-  "newPassword": "newpassword123"
-}
-```
-
-### 5. Get Dashboard Stats
-**GET** `/admin/dashboard-stats`
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Permissions Required:** `viewReports`
-
-### 6. Create Admin (Super Admin Only)
-**POST** `/admin/create`
-
-**Headers:**
-```
-Authorization: Bearer <super_admin_token>
-```
-
-**Required Fields:**
-- `name` (string) - Admin's full name
-- `email` (string) - Admin's email address
-- `password` (string) - Admin's password
-
-**Optional Fields:**
-- `phoneNumber` (string) - Admin's phone number
-- `role` (string) - Admin role (default: "admin")
-- `permissions` (object) - Admin permissions
-- `isFirstAdmin` (boolean) - Set to true for first admin creation (no auth required)
-
-**Body:**
-```json
-{
-  "name": "New Admin",
-  "email": "newadmin@example.com",
-  "password": "password123",
-  "phoneNumber": "+1234567890",
-  "role": "admin",
-  "permissions": {
-    "manageRiders": true,
-    "manageDrivers": true,
-    "viewReports": true,
-    "manageBookings": true,
-    "manageUsers": true,
-    "managePayments": true
+  "success": true,
+  "data": {
+    "referralCode": "REFABC123",
+    "referralCount": 5,
+    "totalEarned": 250,
+    "referredUsers": [ { "name", "email", "joinedAt" } ]
   }
 }
-```
 
-### 7. Get All Admins (Super Admin Only)
-**GET** `/admin/all`
+---
 
-**Headers:**
-```
-Authorization: Bearer <super_admin_token>
-```
+### GET /api/referral/wallet  [Protected]
+Get wallet balance from referrals.
 
-### 8. Update Admin Permissions (Super Admin Only)
-**PUT** `/admin/permissions/:id`
-
-**Headers:**
-```
-Authorization: Bearer <super_admin_token>
-```
-
-**Required Fields:**
-- `permissions` (object) - Updated permissions object
-
-**Body:**
-```json
+Response 200:
 {
-  "permissions": {
-    "manageRiders": true,
-    "manageDrivers": false,
-    "viewReports": true,
-    "manageBookings": true,
-    "manageUsers": false,
-    "managePayments": true
+  "success": true,
+  "data": {
+    "walletBalance": 250,
+    "totalEarned": 500,
+    "transactions": [ ...transactions ]
   }
 }
-```
 
-**Note:** Cannot modify super admin permissions.
+---
 
-### 9. Toggle Admin Status (Super Admin Only)
-**PUT** `/admin/toggle-status/:id`
+### POST /api/referral/validate
+Validate a referral code before signup.
 
-**Headers:**
-```
-Authorization: Bearer <super_admin_token>
-```
-
-**Note:** No request body required. This endpoint toggles the admin's active status.
-
-**Note:** Cannot deactivate super admin.
-
-### 10. Delete Admin (Super Admin Only)
-**DELETE** `/admin/:id`
-
-**Headers:**
-```
-Authorization: Bearer <super_admin_token>
-```
-
-### 11. Approve Rider
-**PUT** `/admin/riders/approve/:riderId`
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Permissions Required:** `manageRiders`
-
-**Optional Fields:**
-- `adminNotes` (string) - Admin notes about the approval
-
-**Body:**
-```json
+Body:
 {
-  "adminNotes": "All documents verified successfully"
+  "referralCode": "REFABC123"
 }
-```
 
-### 12. Reject Rider
-**PUT** `/admin/riders/reject/:riderId`
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Permissions Required:** `manageRiders`
-
-**Required Fields:**
-- `rejectionReason` (string) - Reason for rejection
-
-**Optional Fields:**
-- `rejectedDocument` (string) - Specific document rejected ("license", "insurance", "profilePhoto", "vehicleRegistration")
-
-**Body:**
-```json
+Response 200:
 {
-  "rejectionReason": "Incomplete documents",
+  "success": true,
+  "valid": true,
+  "referredBy": { "name": "John Doe" }
+}
+
+---
+
+## 10. SUPPORT APIs  /api/support
+
+### POST /api/support/create  [Protected]
+Create a support ticket.
+
+Body:
+{
+  "subject": "Payment issue",
+  "message": "My payment was deducted but ride was cancelled",
+  "category": "payment",
+  "bookingId": "bookingId"
+}
+
+Response 201:
+{
+  "success": true,
+  "message": "Support ticket created",
+  "ticket": {
+    "_id": "ticketId",
+    "subject": "Payment issue",
+    "status": "open",
+    "ticketNumber": "TKT-001"
+  }
+}
+
+---
+
+### GET /api/support/my-tickets  [Protected]
+Get all my support tickets.
+
+Response 200:
+{
+  "success": true,
+  "tickets": [
+    { "_id", "subject", "status": "open", "createdAt", "lastReply" }
+  ]
+}
+
+---
+
+### GET /api/support/:ticketId  [Protected]
+Get a specific ticket with all replies.
+
+Response 200:
+{
+  "success": true,
+  "ticket": {
+    "_id", "subject", "message", "status",
+    "replies": [ { "sender", "message", "createdAt" } ]
+  }
+}
+
+---
+
+### POST /api/support/:ticketId/reply  [Protected]
+Reply to a support ticket.
+
+Body:
+{
+  "message": "I have attached the screenshot"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Reply sent successfully"
+}
+
+---
+
+### PUT /api/support/:ticketId/close  [Protected]
+Close a support ticket.
+
+Response 200:
+{
+  "success": true,
+  "message": "Ticket closed successfully"
+}
+
+---
+
+### GET /api/support/admin/all  [Protected + Admin]
+Get all support tickets (admin).
+
+Query Params: status=open|closed|pending, page, limit
+
+Response 200:
+{
+  "success": true,
+  "count": 20,
+  "tickets": [ ...tickets ]
+}
+
+---
+
+### PUT /api/support/admin/:ticketId/status  [Protected + Admin]
+Update ticket status (admin).
+
+Body:
+{
+  "status": "resolved",
+  "adminReply": "Issue has been resolved"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Ticket status updated"
+}
+
+---
+
+## 11. WITHDRAWAL APIs  /api/withdrawal
+
+### GET /api/withdrawal/wallet  [Protected + RiderProtect]
+Get driver wallet details.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "walletBalance": 500,
+    "totalEarning": 2500,
+    "totalWithdrawn": 2000,
+    "pendingEarnings": 0,
+    "bankAccount": { "accountTitle", "accountNumber", "bankName", "isVerified" }
+  }
+}
+
+---
+
+### POST /api/withdrawal/request  [Protected + RiderProtect]
+Request a withdrawal.
+
+Body:
+{
+  "amount": 500,
+  "bankAccountId": "bankId"
+}
+
+Response 201:
+{
+  "success": true,
+  "message": "Withdrawal request submitted",
+  "withdrawal": { "_id", "amount": 500, "status": "pending", "createdAt" }
+}
+
+---
+
+### GET /api/withdrawal/history  [Protected + RiderProtect]
+Get withdrawal history.
+
+Response 200:
+{
+  "success": true,
+  "withdrawals": [
+    { "_id", "amount", "status": "paid", "requestedAt", "paidAt" }
+  ]
+}
+
+---
+
+### PUT /api/withdrawal/bank-account  [Protected + RiderProtect]
+Update bank account details.
+
+Body:
+{
+  "accountTitle": "James Driver",
+  "accountNumber": "1234567890",
+  "bankName": "HBL",
+  "branchCode": "BR123"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Bank account updated successfully"
+}
+
+---
+
+### GET /api/withdrawal/admin/all  [Protected + Admin]
+Get all withdrawal requests (admin).
+
+Query Params: status=pending|approved|rejected|paid, page, limit
+
+Response 200:
+{
+  "success": true,
+  "withdrawals": [ ...withdrawals ]
+}
+
+---
+
+### PUT /api/withdrawal/admin/approve/:withdrawalId  [Protected + Admin]
+Approve a withdrawal request.
+
+Response 200:
+{
+  "success": true,
+  "message": "Withdrawal approved"
+}
+
+---
+
+### PUT /api/withdrawal/admin/reject/:withdrawalId  [Protected + Admin]
+Reject a withdrawal request.
+
+Body:
+{
+  "reason": "Insufficient documents"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Withdrawal rejected"
+}
+
+---
+
+### PUT /api/withdrawal/admin/mark-paid/:withdrawalId  [Protected + Admin]
+Mark withdrawal as paid.
+
+Response 200:
+{
+  "success": true,
+  "message": "Withdrawal marked as paid"
+}
+
+
+---
+
+## 12. ADMIN APIs  /api/admin
+
+All admin routes require: Authorization: Bearer ADMIN_TOKEN
+
+### POST /api/admin/login
+Admin login.
+
+Body:
+{
+  "email": "admin@ridelynk.com",
+  "password": "adminpassword"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "admin": { "_id", "name", "email", "role", "permissions" },
+    "token": "ADMIN_JWT_TOKEN"
+  }
+}
+
+---
+
+### GET /api/admin/dashboard/stats  [Admin]
+Get dashboard statistics.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "users": { "total": 500, "riders": 50, "drivers": 30 },
+    "bookings": { "total": 1000, "completed": 800, "pending": 50, "cancelled": 150 },
+    "revenue": 45000,
+    "pendingVerifications": 5,
+    "recentBookings": [ ...10 recent bookings ],
+    "recentUsers": [ ...10 recent users ]
+  }
+}
+
+---
+
+### GET /api/admin/dashboard/chart-data  [Admin]
+Get chart data for dashboard graphs.
+
+Query Params: period=7d|30d|90d|1y
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "labels": ["Mon", "Tue", "Wed", ...],
+    "rides": [10, 15, 8, ...],
+    "revenue": [500, 750, 400, ...],
+    "users": [5, 8, 3, ...]
+  }
+}
+
+---
+
+### GET /api/admin/dashboard/ride-status  [Admin]
+Get ride status breakdown.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "pending": 10,
+    "accepted": 5,
+    "inProgress": 8,
+    "completed": 800,
+    "cancelled": 150
+  }
+}
+
+---
+
+### GET /api/admin/users  [Admin]
+Get all users with pagination.
+
+Query Params: page, limit, search, role=customer|driver
+
+Response 200:
+{
+  "success": true,
+  "count": 20,
+  "total": 500,
+  "users": [
+    { "_id", "name", "email", "phoneNumber", "role", "createdAt", "walletBalance" }
+  ]
+}
+
+---
+
+### GET /api/admin/users/:id  [Admin]
+Get user by ID.
+
+Response 200:
+{
+  "success": true,
+  "user": { ...full user data }
+}
+
+---
+
+### PUT /api/admin/users/:id  [Admin]
+Update user details.
+
+Body:
+{
+  "name": "Updated Name",
+  "phoneNumber": "03001234567",
+  "isBlocked": false
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "User updated successfully",
+  "user": { ...updated user }
+}
+
+---
+
+### DELETE /api/admin/users/:id  [Admin]
+Delete a user.
+
+Response 200:
+{
+  "success": true,
+  "message": "User deleted successfully"
+}
+
+---
+
+### GET /api/admin/drivers  [Admin]
+Get all drivers.
+
+Query Params: page, limit, status=active|inactive, verificationStatus=approved|pending|rejected
+
+Response 200:
+{
+  "success": true,
+  "count": 10,
+  "total": 30,
+  "drivers": [
+    {
+      "_id", "user": { "name", "email", "phoneNumber" },
+      "isVerified", "verificationStatus", "status",
+      "rating", "totalRides", "vehicleDetails"
+    }
+  ]
+}
+
+---
+
+### GET /api/admin/drivers/pending  [Admin]
+Get all pending driver verification requests.
+
+Response 200:
+{
+  "success": true,
+  "count": 5,
+  "drivers": [ ...pending drivers with documents ]
+}
+
+---
+
+### GET /api/admin/drivers/:id  [Admin]
+Get driver by ID with full details.
+
+Response 200:
+{
+  "success": true,
+  "driver": {
+    "_id", "user": { "name", "email" },
+    "vehicleDetails", "documents", "rating",
+    "totalRides", "totalEarning", "walletBalance"
+  }
+}
+
+---
+
+### POST /api/admin/drivers/:id/verify  [Admin]
+Approve a driver.
+
+Body:
+{
+  "adminNotes": "All documents verified"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Driver approved successfully. They can now start driving."
+}
+
+---
+
+### POST /api/admin/drivers/:id/reject  [Admin]
+Reject a driver.
+
+Body:
+{
+  "rejectionReason": "License expired",
   "rejectedDocument": "license"
 }
-```
 
-### 13. Get Pending Verifications
-**GET** `/admin/riders/pending`
-
-**Headers:**
-```
-Authorization: Bearer <admin_token>
-```
-
-**Permissions Required:** `manageRiders`
+Response 200:
+{
+  "success": true,
+  "message": "Driver rejected. They need to resubmit documents."
+}
 
 ---
 
-## 🚙 Ride Types APIs
+### GET /api/admin/rides  [Admin]
+Get all rides (cab + parcel + pet).
 
-### 1. Get Ride Types
-**GET** `/ride-types`
+Query Params: status, type=cab|parcel|pet, page, limit, startDate, endDate
 
-**Response Example:**
-```json
+Response 200:
+{
+  "success": true,
+  "count": 20,
+  "total": 1000,
+  "rides": [ ...rides with user and driver populated ]
+}
+
+---
+
+### GET /api/admin/rides/:id  [Admin]
+Get ride by ID.
+
+Response 200:
+{
+  "success": true,
+  "ride": { ...full ride with user, driver, statusHistory }
+}
+
+---
+
+### PUT /api/admin/rides/:id/status  [Admin]
+Update ride status.
+
+Body:
+{
+  "status": "cancelled",
+  "reason": "Admin cancelled due to complaint"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Ride status updated"
+}
+
+---
+
+### DELETE /api/admin/rides/:id  [Admin]
+Delete a ride.
+
+Response 200:
+{
+  "success": true,
+  "message": "Ride deleted successfully"
+}
+
+---
+
+### GET /api/admin/driver-verifications  [Admin]
+Get all driver verification requests.
+
+Response 200:
+{
+  "success": true,
+  "verifications": [ ...drivers with documents ]
+}
+
+---
+
+### GET /api/admin/driver-verifications/pending  [Admin]
+Get pending verifications only.
+
+Response 200:
+{
+  "success": true,
+  "count": 5,
+  "data": [ ...pending drivers ]
+}
+
+---
+
+### POST /api/admin/driver-verifications/:id/approve  [Admin]
+Approve driver verification.
+
+Body:
+{
+  "adminNotes": "Documents verified"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Driver approved successfully"
+}
+
+---
+
+### POST /api/admin/driver-verifications/:id/reject  [Admin]
+Reject driver verification.
+
+Body:
+{
+  "rejectionReason": "Blurry documents",
+  "rejectedDocument": "license"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Driver rejected"
+}
+
+---
+
+### GET /api/admin/analytics/overview  [Admin]
+Get analytics overview.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "totalRevenue": 45000,
+    "totalRides": 1000,
+    "totalUsers": 500,
+    "totalDrivers": 30,
+    "avgRating": 4.7,
+    "completionRate": "80%"
+  }
+}
+
+---
+
+### GET /api/admin/analytics/revenue  [Admin]
+Get revenue analytics.
+
+Query Params: period=7d|30d|90d|1y
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "totalRevenue": 45000,
+    "byPeriod": [ { "date": "2024-01-15", "revenue": 1500 } ],
+    "byType": { "cab": 30000, "parcel": 10000, "pet": 5000 }
+  }
+}
+
+---
+
+### GET /api/admin/analytics/rides  [Admin]
+Get ride analytics.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "totalRides": 1000,
+    "byStatus": { "completed": 800, "cancelled": 150, "pending": 50 },
+    "byType": { "cab": 600, "parcel": 300, "pet": 100 },
+    "byDay": [ { "date": "2024-01-15", "count": 45 } ]
+  }
+}
+
+---
+
+### GET /api/admin/recent-activities  [Admin]
+Get recent platform activities.
+
+Response 200:
+{
+  "success": true,
+  "activities": [
+    { "type": "new_booking", "message": "New cab booking created", "timestamp": "..." },
+    { "type": "driver_verified", "message": "Driver James approved", "timestamp": "..." }
+  ]
+}
+
+---
+
+### GET /api/admin/settings  [Admin]
+Get platform settings.
+
+Response 200:
+{
+  "success": true,
+  "settings": {
+    "driverCommission": 80,
+    "platformFee": 20,
+    "referralBonus": 50,
+    "minWithdrawal": 100,
+    "maxWithdrawal": 10000
+  }
+}
+
+---
+
+### PUT /api/admin/settings  [Admin]
+Update platform settings.
+
+Body:
+{
+  "driverCommission": 80,
+  "platformFee": 20,
+  "referralBonus": 50,
+  "minWithdrawal": 100
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Settings updated successfully"
+}
+
+---
+
+### GET /api/admin/referral/earnings  [Admin]
+Get all referral earnings.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "totalReferralEarnings": 5000,
+    "transactions": [ ...referral transactions ]
+  }
+}
+
+---
+
+### GET /api/admin/referral/earnings/:userId  [Admin]
+Get referral earnings for a specific user.
+
+Response 200:
+{
+  "success": true,
+  "data": {
+    "user": { "name", "email" },
+    "referralCode": "REFABC123",
+    "totalEarned": 250,
+    "transactions": [ ...transactions ]
+  }
+}
+
+---
+
+### GET /api/admin/promotions  [Admin]
+Get all promotions.
+
+Response 200:
+{
+  "success": true,
+  "promotions": [
+    { "_id", "code": "SAVE20", "discount": 20, "type": "percentage", "isActive": true }
+  ]
+}
+
+---
+
+### POST /api/admin/promotions  [Admin]
+Create a promotion.
+
+Body:
+{
+  "code": "SAVE20",
+  "discount": 20,
+  "type": "percentage",
+  "minOrderValue": 100,
+  "maxDiscount": 50,
+  "expiryDate": "2024-12-31",
+  "usageLimit": 100
+}
+
+Response 201:
+{
+  "success": true,
+  "message": "Promotion created successfully",
+  "promotion": { "_id", "code": "SAVE20", "discount": 20 }
+}
+
+---
+
+### PUT /api/admin/promotions/:id  [Admin]
+Update a promotion.
+
+Body:
+{
+  "isActive": false,
+  "expiryDate": "2025-01-31"
+}
+
+Response 200:
+{
+  "success": true,
+  "message": "Promotion updated successfully"
+}
+
+---
+
+### DELETE /api/admin/promotions/:id  [Admin]
+Delete a promotion.
+
+Response 200:
+{
+  "success": true,
+  "message": "Promotion deleted successfully"
+}
+
+---
+
+## 13. RIDE TYPES API  /api
+
+### GET /api/ride-types
+Get all available ride/vehicle types.
+
+Response 200:
 {
   "success": true,
   "rideTypes": [
     {
-      "_id": "ride_type_id",
+      "_id": "typeId",
       "name": "Economy",
-      "description": "Affordable rides",
-      "baseFare": 5.00,
-      "perKmRate": 1.50,
-      "perMinuteRate": 0.25,
-      "vehicleType": "sedan",
-      "capacity": 4
+      "category": "cab",
+      "basePrice": 50,
+      "pricePerKm": 10,
+      "capacity": 4,
+      "features": "AC, 4 Seats",
+      "icon": "url"
     }
   ]
 }
-```
 
 ---
 
-## 🔔 Webhook APIs
+## 14. PUSHER REAL-TIME CHANNELS
 
-### 1. Stripe Webhook
-**POST** `/webhook/stripe-webhook`
+### Channel: ride-{bookingId}
+Subscribe when user opens a ride booking.
 
-**Headers:**
-```
-stripe-signature: <signature>
-Content-Type: application/json
-```
-
-**Body:** (Sent by Stripe)
-```json
-{
-  "type": "payment_intent.succeeded",
-  "data": {
-    "object": {
-      "id": "pi_1234567890",
-      "amount": 2500,
-      "status": "succeeded"
-    }
+Events:
+- ride-status-update: Fires on every status change
+  {
+    "bookingId", "type": "cab", "status": "accepted|onTheWay|arrived|inProgress|completed|cancelled",
+    "booking": { id, status, fare, distance, duration, pickup, dropoff, timestamps, statusHistory },
+    "user": { id, name, email, phone, profileImage },
+    "driver": { id, name, phone, profileImage, rating, totalRides, currentLocation, vehicle },
+    "timestamp": "..."
   }
-}
-```
 
-**Webhook Events Handled:**
-- `payment_intent.amount_capturable_updated`
-- `payment_intent.succeeded`
-- `payment_intent.payment_failed`
-- `charge.refunded`
-
----
-
-## 🔑 Authentication Notes
-
-### Token Format
-```
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
-
-### User Roles
-- `user` - Regular user/passenger
-- `driver` - Driver/Rider
-- `admin` - Admin user
-- `superadmin` - Super admin with full permissions
-
-### Admin Permissions
-- `manageRiders` - Approve/reject riders
-- `manageDrivers` - Manage driver accounts
-- `viewReports` - View dashboard statistics
-- `manageBookings` - Manage ride bookings
-
----
-
-## 📝 Common Response Formats
-
-### Success Response
-```json
-{
-  "success": true,
-  "message": "Operation successful",
-  "data": {
-    // Response data here
+- driver-location-update: Fires every time driver updates location
+  {
+    "driverId": "...",
+    "latitude": 24.8607,
+    "longitude": 67.0011,
+    "status": "inProgress",
+    "timestamp": "..."
   }
-}
-```
 
-### Error Response
-```json
+---
+
+### Channel: parcel-delivery-{bookingId}
+Subscribe when user opens a parcel delivery.
+
+Events:
+- delivery-accepted: When driver accepts
+  { "bookingId", "status": "accepted", "driver": { id, name } }
+
+- delivery-status-update: On every status change
+  { "bookingId", "status": "onTheWay|arrived|inProgress|completed|cancelled", "timestamp" }
+
+- driver-location-update: Driver live location
+  { "driverId", "latitude", "longitude", "timestamp" }
+
+---
+
+### Channel: pet-delivery-{bookingId}
+Subscribe when user opens a pet delivery.
+
+Events:
+- delivery-accepted: When driver accepts
+- delivery-status-update: On every status change
+- driver-location-update: Driver live location
+
+---
+
+### Channel: ride-bookings
+Global channel for new cab ride notifications to drivers.
+Event: new-ride-booking { bookingId, type, fare, distance, pickupLocationName, ... }
+
+### Channel: parcel-bookings
+Global channel for new parcel notifications to drivers.
+Event: new-parcel-booking { bookingId, type, fare, distance, ... }
+
+### Channel: pet-bookings
+Global channel for new pet delivery notifications to drivers.
+Event: new-pet-booking { bookingId, type, petName, petType, fare, ... }
+
+### Channel: rider-{riderId}
+Personal channel for each driver.
+Events: new-ride-booking, new-parcel-booking, new-pet-booking
+
+---
+
+## 15. STATUS FLOW
+
+### Cab Ride Status Flow:
+pending -> accepted -> onTheWay -> arrived -> inProgress -> completed
+                                                         -> cancelled (any stage)
+
+### Parcel / Pet Delivery Status Flow:
+pending -> accepted -> onTheWay -> arrived -> inProgress -> completed
+                                                         -> cancelled (any stage)
+
+### Status Progress %:
+- pending: 0%
+- accepted: 20%
+- onTheWay: 40%
+- arrived: 60%
+- inProgress: 80%
+- completed: 100%
+- cancelled: 0%
+
+---
+
+## 16. ERROR RESPONSES
+
+All APIs return errors in this format:
+
+Response 400 (Bad Request):
 {
   "success": false,
-  "message": "Error message",
-  "error": "Detailed error information"
+  "message": "Specific error message"
 }
-```
 
-### Validation Error Response
-```json
+Response 401 (Unauthorized):
 {
   "success": false,
-  "message": "Validation failed",
-  "errors": [
-    {
-      "field": "email",
-      "message": "Invalid email format"
-    }
-  ]
+  "message": "Not authorized, token failed"
 }
-```
 
----
-
-## 🌐 Status Codes
-
-- `200` - Success
-- `201` - Created
-- `400` - Bad Request
-- `401` - Unauthorized
-- `403` - Forbidden
-- `404` - Not Found
-- `500` - Internal Server Error
-
----
-
-## 📍 Location Format
-
-All location fields use GeoJSON format:
-```json
+Response 403 (Forbidden):
 {
-  "type": "Point",
-  "coordinates": [longitude, latitude]
+  "success": false,
+  "message": "Access denied"
 }
-```
 
-**Example:**
-```json
+Response 404 (Not Found):
 {
-  "type": "Point",
-  "coordinates": [-74.0060, 40.7128]
+  "success": false,
+  "message": "Resource not found"
 }
-```
 
----
+Response 500 (Server Error):
+{
+  "success": false,
+  "message": "Internal server error",
+  "error": "Error details"
+}
 
-## 🔄 Ride Booking Status Flow
-
-**Status Progression:**
-1. `pending` - Ride created, waiting for driver acceptance
-2. `accepted` - Driver accepted the ride
-3. `onTheWay` - Driver is on the way to pickup location
-4. `arrived` - Driver reached pickup location
-5. `inProgress` - Ride started (passenger picked up)
-6. `completed` - Ride completed successfully
-7. `cancelled` - Ride cancelled (by user, driver, or admin)
-
-**Status Transitions:**
-- `pending` → `accepted` (via `/rides/accept/:bookingId`)
-- `accepted` → `onTheWay` (via `/rides/:bookingId/on-the-way`)
-- `onTheWay` → `arrived` (via `/rides/:bookingId/reached-pickup`)
-- `arrived` → `inProgress` (via `/rides/:bookingId/start`)
-- `inProgress` → `completed` (via `/rides/:bookingId/complete`)
-- Any status → `cancelled` (via cancel endpoints)
-
-**Cancellation Rules:**
-- User can cancel: `pending`, `accepted`
-- Driver can cancel: `accepted`, `ongoing`
-- Admin can cancel: Any status
-
----
-
-## 💰 Payment Status Flow
-
-**Status Progression:**
-1. `pending` - Payment not initiated
-2. `authorized` - Payment authorized (hold placed on card)
-3. `captured` - Payment captured (money transferred)
-4. `failed` - Payment failed
-5. `cancelled` - Payment cancelled (hold released)
-6. `refunded` - Payment refunded
-
-**Payment Methods:**
-- `Card` - Credit/Debit card via Stripe
-- `Cash` - Cash payment on delivery
-
-**Payment Flow for Card:**
-1. User books ride with card → Payment authorized (hold placed)
-2. Ride completed → Payment captured automatically
-3. Ride cancelled → Payment authorization cancelled (hold released)
-
-**Important Notes:**
-- Card payments require `defaultPaymentMethod` to be set
-- Authorization holds funds but doesn't charge
-- Capture happens automatically on ride completion
-- Cancellation releases the hold immediately
-
-## 🚗 Driver Onboarding Flow
-
-**Step-by-Step Process:**
-
-1. **Register as Driver**
-   - POST `/auth/register/driver`
-   - Provide: name, email, password, phoneNumber
-
-2. **Add Vehicle Details**
-   - POST `/rider/vehicle-details` or `/rider/add-complete-vehicle-details`
-   - Provide: category, make, model, year, licensePlate
-
-3. **Upload Driver's License**
-   - POST `/rider/upload-license`
-   - Upload: frontImage, backImage
-   - Provide: licenseNumber, expiryDate
-
-4. **Upload Insurance**
-   - POST `/rider/upload-insurance`
-   - Upload: insurance document
-   - Provide: provider, policyNumber, expiryDate
-
-5. **Upload Profile Photo**
-   - POST `/rider/upload-profile-photo`
-   - Upload: profilePhoto
-
-6. **Accept Terms & Conditions**
-   - POST `/rider/accept-terms`
-   - Set: accepted = true
-
-7. **Submit for Verification**
-   - POST `/rider/submit-verification`
-   - All previous steps must be completed
-
-8. **Admin Approval**
-   - Admin reviews and approves/rejects
-   - PUT `/admin/riders/approve/:riderId` or `/admin/riders/reject/:riderId`
-
-9. **Start Driving**
-   - Once approved, driver can set status to "available"
-   - PUT `/rider/status` with status = "available"
-
-**Verification Statuses:**
-- `pending` - Initial status
-- `in_review` - Submitted for admin review
-- `approved` - Approved by admin, can start driving
-- `rejected` - Rejected by admin, needs resubmission
-
----
-
-## 🔔 Real-time Updates (Pusher)
-
-**Pusher Channels:**
-- `ride-{bookingId}` - Real-time updates for specific ride
-- `driver-status` - Driver availability updates
-
-**Events:**
-- `new-message` - New chat message received
-- `ride-status-update` - Ride status changed
-- `driver-location-update` - Driver location updated
-- `driver-available` - Driver became available
-
-**Authentication:**
-- Use `/chat/pusher/auth` endpoint to authenticate Pusher channels
-- Required for private channels
-
-**Example Usage:**
-```javascript
-const pusher = new Pusher('YOUR_PUSHER_KEY', {
-  cluster: 'YOUR_CLUSTER',
-  authEndpoint: '/api/chat/pusher/auth'
-});
-
-const channel = pusher.subscribe('private-ride-123456');
-channel.bind('driver-location-update', function(data) {
-  console.log('Driver location:', data.latitude, data.longitude);
-});
-```
-
----
-
-## 📊 API Rate Limits
-
-- Authentication endpoints: 5 requests per minute
-- Booking creation: 10 requests per minute
-- Location updates: 60 requests per minute
-- General endpoints: 100 requests per minute
-
-**Rate Limit Headers:**
-```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1640000000
-```
-
----
-
-## 🔒 Security Best Practices
-
-1. **Always use HTTPS** in production
-2. **Store tokens securely** (never in localStorage for sensitive apps)
-3. **Validate all inputs** on client side before sending
-4. **Handle errors gracefully** and don't expose sensitive information
-5. **Implement request timeouts** to prevent hanging requests
-6. **Use environment variables** for API keys and secrets
-7. **Rotate tokens regularly** for enhanced security
-8. **Implement CORS properly** to restrict API access
-9. **Sanitize user inputs** to prevent XSS attacks
-10. **Use prepared statements** to prevent SQL injection
-
----
-
-## 🐛 Common Error Codes
-
-| Status Code | Meaning | Common Causes |
-|-------------|---------|---------------|
-| 400 | Bad Request | Missing required fields, invalid data format |
-| 401 | Unauthorized | Invalid or expired token, not logged in |
-| 403 | Forbidden | Insufficient permissions, account not verified |
-| 404 | Not Found | Resource doesn't exist, invalid ID |
-| 409 | Conflict | Duplicate entry, resource already exists |
-| 422 | Unprocessable Entity | Validation failed, invalid data |
-| 429 | Too Many Requests | Rate limit exceeded |
-| 500 | Server Error | Internal server issue, database error |
-| 503 | Service Unavailable | Server maintenance, temporary downtime |
-
----
-
-## 📱 Testing the APIs
-
-**Recommended Tools:**
-- Postman
-- Insomnia
-- Thunder Client (VS Code)
-- cURL
-- HTTPie
-
-**Example cURL Request:**
-```bash
-# Login
-curl -X POST http://localhost:5000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"password123"}'
-
-# Get Profile with Authorization
-curl -X GET http://localhost:5000/api/users/profile \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE"
-
-# Create Ride Booking
-curl -X POST http://localhost:5000/api/rides/ridebook \
-  -H "Authorization: Bearer YOUR_TOKEN_HERE" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "category": "ride",
-    "pickupLocation": {"type": "Point", "coordinates": [-74.0060, 40.7128]},
-    "dropoffLocation": {"type": "Point", "coordinates": [-73.9352, 40.7306]},
-    "selectedVehicle": {"id": "123", "name": "Economy", "features": [], "capacity": 4}
-  }'
-```
-
-**Postman Collection:**
-Import the API endpoints into Postman for easier testing. Set up environment variables for:
-- `base_url`: http://localhost:5000/api
-- `token`: Your authentication token
-- `admin_token`: Admin authentication token
-
----
-
-## 🔧 Environment Variables
-
-Required environment variables for the backend:
-
-```env
-# Server
-PORT=5000
-NODE_ENV=development
-
-# Database
-MONGODB_URI=mongodb://localhost:27017/cab_booking
-
-# JWT
-JWT_SECRET=your_jwt_secret_key
-
-# Stripe
-STRIPE_SECRET_KEY=sk_test_xxxxx
-STRIPE_WEBHOOK_SECRET=whsec_xxxxx
-
-# Cloudinary
-CLOUDINARY_CLOUD_NAME=your_cloud_name
-CLOUDINARY_API_KEY=your_api_key
-CLOUDINARY_API_SECRET=your_api_secret
-
-# Pusher
-PUSHER_APP_ID=your_app_id
-PUSHER_KEY=your_key
-PUSHER_SECRET=your_secret
-PUSHER_CLUSTER=your_cluster
-
-# Email (Optional)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email@gmail.com
-SMTP_PASS=your_password
-```
-
----
-
-## 📚 Additional Resources
-
-**Documentation:**
-- [Stripe API Documentation](https://stripe.com/docs/api)
-- [Pusher Documentation](https://pusher.com/docs)
-- [MongoDB Documentation](https://docs.mongodb.com/)
-- [Express.js Guide](https://expressjs.com/en/guide/routing.html)
-
-**Support:**
-- GitHub Issues: [Report bugs or request features]
-- Email: support@yourdomain.com
-- Documentation: https://docs.yourdomain.com
-
----
-
-## 🎯 Quick Start Guide
-
-1. **Clone the repository**
-2. **Install dependencies:** `npm install`
-3. **Set up environment variables:** Copy `.env.example` to `.env`
-4. **Start MongoDB:** `mongod`
-5. **Run the server:** `npm start` or `npm run dev`
-6. **Test the API:** Use Postman or cURL to test endpoints
-
----
-
-## 📝 Changelog
-
-### Version 1.0.0 (April 2026)
-- Initial release
-- User authentication and authorization
-- Ride booking system
-- Driver onboarding and verification
-- Payment integration with Stripe
-- Real-time chat and location tracking
-- Admin dashboard and management
-- Parcel and pet delivery booking
-- Review and rating system
-
----
-
-**Last Updated:** April 11, 2026  
-**Version:** 1.0.0  
-**Backend Framework:** Node.js + Express.js  
-**Database:** MongoDB with Mongoose  
-**Payment Gateway:** Stripe  
-**Real-time Communication:** Pusher  
-**File Storage:** Cloudinary  
-**Authentication:** JWT (JSON Web Tokens)
-
----
-
-**Total Endpoints:** 81+  
-**Total Categories:** 12  
-**Supported Platforms:** Web, iOS, Android  
-
----
-
-*This documentation is maintained by the development team. For updates or corrections, please contact the team or submit a pull request.*

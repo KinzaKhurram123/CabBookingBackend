@@ -6,6 +6,9 @@ const Promotion = require("../models/promotion");
 const Settings = require("../models/settings");
 const Role = require("../models/role");
 const Permission = require("../models/permission");
+const Rider = require("../models/riderModel");
+const RideType = require("../models/rideType");
+const stripe = require("../config/stripe");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 
@@ -490,52 +493,127 @@ exports.unblockUser = async (req, res) => {
 
 exports.getAllDrivers = async (req, res) => {
   try {
-    const { page = 1, limit = 10, status = "" } = req.query;
-    const query = status ? { verificationStatus: status } : {};
+    const { page = 1, limit = 10, status, verificationStatus, search } = req.query;
 
-    const drivers = await Driver.find(query)
-      .populate("user", "name email phoneNumber profileImage")
+    const query = {};
+    if (status) query.status = status;
+    if (verificationStatus) query.verificationStatus = verificationStatus;
+
+    let riders = await Rider.find(query)
+      .populate("user", "name email phoneNumber profileImage city country createdAt")
       .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .lean();
 
-    const total = await Driver.countDocuments(query);
+    // Apply search filter on populated user fields
+    if (search) {
+      const s = search.toLowerCase();
+      riders = riders.filter((r) =>
+        r.user?.name?.toLowerCase().includes(s) ||
+        r.user?.email?.toLowerCase().includes(s) ||
+        r.user?.phoneNumber?.toLowerCase().includes(s) ||
+        r.vehicleDetails?.licensePlate?.toLowerCase().includes(s)
+      );
+    }
+
+    const total = await Rider.countDocuments(query);
+
+    const formatted = riders.map((r) => ({
+      id: r._id,
+      name: r.user?.name || "N/A",
+      email: r.user?.email || "N/A",
+      phone: r.user?.phoneNumber || r.phoneNumber || "N/A",
+      profileImage: r.user?.profileImage || null,
+      city: r.user?.city || r.city || "N/A",
+      country: r.user?.country || "N/A",
+      status: r.status,
+      isVerified: r.isVerified,
+      verificationStatus: r.verificationStatus,
+      rating: r.rating || 5,
+      totalRides: r.totalRides || 0,
+      totalEarning: r.totalEarning || 0,
+      walletBalance: r.walletBalance || 0,
+      vehicle: {
+        category: r.vehicleDetails?.category || "N/A",
+        type: r.vehicleDetails?.vehicleType || "N/A",
+        make: r.vehicleDetails?.make || "N/A",
+        model: r.vehicleDetails?.model || "N/A",
+        year: r.vehicleDetails?.year || "N/A",
+        color: r.vehicleDetails?.color || "N/A",
+        licensePlate: r.vehicleDetails?.licensePlate || "N/A",
+      },
+      documents: {
+        license: r.documents?.license?.status || "N/A",
+        insurance: r.documents?.insurance?.status || "N/A",
+        profilePhoto: r.documents?.profilePhoto?.status || "N/A",
+        vehicleRegistration: r.documents?.vehicleRegistration?.status || "N/A",
+      },
+      joinedAt: r.createdAt,
+    }));
 
     res.status(200).json({
       success: true,
-      data: drivers,
+      count: formatted.length,
       total,
       page: parseInt(page),
-      pages: Math.ceil(total / limit),
+      pages: Math.ceil(total / parseInt(limit)),
+      data: formatted,
     });
   } catch (error) {
+    console.error("getAllDrivers error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
+      error: error.message,
     });
   }
 };
 
 exports.getDriverById = async (req, res) => {
   try {
-    const driver = await Driver.findById(req.params.id).populate(
-      "user",
-      "name email phoneNumber profileImage",
-    );
+    const driver = await Rider.findById(req.params.id)
+      .populate("user", "name email phoneNumber profileImage city country createdAt")
+      .lean();
+
     if (!driver) {
       return res.status(404).json({
         success: false,
         message: "Driver not found",
       });
     }
+
     res.status(200).json({
       success: true,
-      data: driver,
+      data: {
+        id: driver._id,
+        name: driver.user?.name || "N/A",
+        email: driver.user?.email || "N/A",
+        phone: driver.user?.phoneNumber || driver.phoneNumber || "N/A",
+        profileImage: driver.user?.profileImage || null,
+        city: driver.user?.city || driver.city || "N/A",
+        status: driver.status,
+        isVerified: driver.isVerified,
+        verificationStatus: driver.verificationStatus,
+        rating: driver.rating || 5,
+        totalRides: driver.totalRides || 0,
+        totalEarning: driver.totalEarning || 0,
+        walletBalance: driver.walletBalance || 0,
+        vehicle: driver.vehicleDetails || {},
+        documents: driver.documents || {},
+        bankAccount: driver.bankAccount || {},
+        emergencyContact: driver.emergencyContact || {},
+        address: driver.address || "N/A",
+        adminNotes: driver.adminNotes || null,
+        joinedAt: driver.createdAt,
+      },
     });
   } catch (error) {
+    console.error("getDriverById error:", error);
     res.status(500).json({
       success: false,
       message: "Server error",
+      error: error.message,
     });
   }
 };
@@ -1142,9 +1220,11 @@ exports.deleteRide = async (req, res) => {
 
 exports.getDriverVerifications = async (req, res) => {
   try {
-    const verifications = await Driver.find({
+    const verifications = await Rider.find({
       verificationStatus: { $in: ["pending", "in_review"] },
-    }).populate("user", "name email phoneNumber profileImage");
+    })
+      .populate("user", "name email phoneNumber profileImage")
+      .lean();
 
     res.status(200).json({
       success: true,
@@ -1160,10 +1240,12 @@ exports.getDriverVerifications = async (req, res) => {
 
 exports.getPendingVerifications = async (req, res) => {
   try {
-    const pending = await Driver.find({
+    const pending = await Rider.find({
       verificationStatus: "pending",
       isVerified: false,
-    }).populate("user", "name email phoneNumber");
+    })
+      .populate("user", "name email phoneNumber profileImage")
+      .lean();
 
     res.status(200).json({
       success: true,
@@ -1179,10 +1261,9 @@ exports.getPendingVerifications = async (req, res) => {
 
 exports.getVerificationById = async (req, res) => {
   try {
-    const verification = await Driver.findById(req.params.id).populate(
-      "user",
-      "name email phoneNumber profileImage",
-    );
+    const verification = await Rider.findById(req.params.id)
+      .populate("user", "name email phoneNumber profileImage")
+      .lean();
 
     if (!verification) {
       return res.status(404).json({
@@ -1204,32 +1285,32 @@ exports.getVerificationById = async (req, res) => {
 
 exports.approveVerification = async (req, res) => {
   try {
-    const driver = await Driver.findById(req.params.id);
-    if (!driver) {
+    const rider = await Rider.findById(req.params.id);
+    if (!rider) {
       return res.status(404).json({
         success: false,
-        message: "Driver not found",
+        message: "Rider not found",
       });
     }
 
-    if (driver.documents?.license) driver.documents.license.status = "approved";
-    if (driver.documents?.insurance)
-      driver.documents.insurance.status = "approved";
-    if (driver.documents?.profilePhoto)
-      driver.documents.profilePhoto.status = "approved";
-    if (driver.documents?.vehicleRegistration)
-      driver.documents.vehicleRegistration.status = "approved";
+    if (rider.documents?.license) rider.documents.license.status = "approved";
+    if (rider.documents?.insurance)
+      rider.documents.insurance.status = "approved";
+    if (rider.documents?.profilePhoto)
+      rider.documents.profilePhoto.status = "approved";
+    if (rider.documents?.vehicleRegistration)
+      rider.documents.vehicleRegistration.status = "approved";
 
-    driver.isVerified = true;
-    driver.verificationStatus = "approved";
-    driver.status = "active";
-    driver.verifiedAt = new Date();
-    await driver.save();
+    rider.isVerified = true;
+    rider.verificationStatus = "approved";
+    rider.status = "available";
+    rider.verifiedAt = new Date();
+    await rider.save();
 
     res.status(200).json({
       success: true,
-      message: "Driver verification approved successfully",
-      data: driver,
+      message: "Rider verification approved successfully",
+      data: rider,
     });
   } catch (error) {
     res.status(500).json({
@@ -1242,30 +1323,30 @@ exports.approveVerification = async (req, res) => {
 exports.rejectVerification = async (req, res) => {
   try {
     const { rejectionReason, rejectedDocument } = req.body;
-    const driver = await Driver.findById(req.params.id);
+    const rider = await Rider.findById(req.params.id);
 
-    if (!driver) {
+    if (!rider) {
       return res.status(404).json({
         success: false,
-        message: "Driver not found",
+        message: "Rider not found",
       });
     }
 
-    if (rejectedDocument && driver.documents[rejectedDocument]) {
-      driver.documents[rejectedDocument].status = "rejected";
-      driver.documents[rejectedDocument].rejectionReason = rejectionReason;
+    if (rejectedDocument && rider.documents[rejectedDocument]) {
+      rider.documents[rejectedDocument].status = "rejected";
+      rider.documents[rejectedDocument].rejectionReason = rejectionReason;
     }
 
-    driver.isVerified = false;
-    driver.verificationStatus = "rejected";
-    driver.status = "inactive";
-    driver.rejectionReason = rejectionReason;
-    await driver.save();
+    rider.isVerified = false;
+    rider.verificationStatus = "rejected";
+    rider.status = "inactive";
+    rider.rejectionReason = rejectionReason;
+    await rider.save();
 
     res.status(200).json({
       success: true,
-      message: "Driver verification rejected",
-      data: driver,
+      message: "Rider verification rejected",
+      data: rider,
     });
   } catch (error) {
     res.status(500).json({
@@ -1835,6 +1916,290 @@ exports.updateAdminPermissions = async (req, res) => {
 //   getDriverVerifications,
 //   getPendingVerifications,
 //   getVerificationById,
+// ============================================
+// STRIPE CONNECT ADMIN MANAGEMENT
+// ============================================
+
+// Get all drivers with Connect account status
+exports.getDriverConnectAccounts = async (req, res) => {
+  try {
+    const { status, page = 1, limit = 50 } = req.query;
+
+    let filter = {};
+    if (status && status !== 'all') {
+      filter.connectAccountStatus = status;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const riders = await Rider.find(filter)
+      .populate('user', 'name email phoneNumber')
+      .select('stripeConnectAccountId connectAccountStatus connectOnboardingComplete connectChargesEnabled connectPayoutsEnabled connectAccountCreatedAt totalEarning')
+      .sort({ connectAccountCreatedAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Rider.countDocuments(filter);
+
+    res.status(200).json({
+      success: true,
+      count: riders.length,
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit)),
+      riders
+    });
+  } catch (error) {
+    console.error('Get driver Connect accounts error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve driver Connect accounts',
+      error: error.message
+    });
+  }
+};
+
+// Get specific driver's Connect account details
+exports.getDriverConnectDetails = async (req, res) => {
+  try {
+    const { riderId } = req.params;
+
+    const rider = await Rider.findById(riderId).populate('user', 'name email phoneNumber');
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: 'Rider not found'
+      });
+    }
+
+    if (!rider.stripeConnectAccountId) {
+      return res.status(200).json({
+        success: true,
+        message: 'No Connect account found',
+        rider: {
+          _id: rider._id,
+          user: rider.user,
+          connectAccountStatus: 'not_started',
+          stripeAccount: null
+        }
+      });
+    }
+
+    const account = await stripe.accounts.retrieve(rider.stripeConnectAccountId);
+
+    res.status(200).json({
+      success: true,
+      rider: {
+        _id: rider._id,
+        user: rider.user,
+        stripeConnectAccountId: rider.stripeConnectAccountId,
+        connectAccountStatus: rider.connectAccountStatus,
+        connectOnboardingComplete: rider.connectOnboardingComplete,
+        connectChargesEnabled: rider.connectChargesEnabled,
+        connectPayoutsEnabled: rider.connectPayoutsEnabled,
+        connectAccountCreatedAt: rider.connectAccountCreatedAt,
+        totalEarning: rider.totalEarning
+      },
+      stripeAccount: {
+        id: account.id,
+        type: account.type,
+        country: account.country,
+        email: account.email,
+        detailsSubmitted: account.details_submitted,
+        chargesEnabled: account.charges_enabled,
+        payoutsEnabled: account.payouts_enabled,
+        requirementsCurrentlyDue: account.requirements?.currently_due || [],
+        requirementsEventuallyDue: account.requirements?.eventually_due || [],
+        requirementsPastDue: account.requirements?.past_due || [],
+        payoutSchedule: account.settings?.payouts?.schedule || null
+      }
+    });
+  } catch (error) {
+    console.error('Get driver Connect details error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve driver Connect details',
+      error: error.message
+    });
+  }
+};
+
+// Generate onboarding link for driver (admin action)
+exports.generateDriverOnboardingLink = async (req, res) => {
+  try {
+    const { riderId } = req.params;
+
+    const rider = await Rider.findById(riderId);
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: 'Rider not found'
+      });
+    }
+
+    if (!rider.stripeConnectAccountId) {
+      return res.status(400).json({
+        success: false,
+        message: 'No Connect account found for this driver'
+      });
+    }
+
+    const accountLink = await stripe.accountLinks.create({
+      account: rider.stripeConnectAccountId,
+      refresh_url: process.env.CONNECT_REFRESH_URL,
+      return_url: process.env.CONNECT_RETURN_URL,
+      type: 'account_onboarding',
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Onboarding link generated for driver',
+      url: accountLink.url
+    });
+  } catch (error) {
+    console.error('Generate driver onboarding link error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to generate onboarding link',
+      error: error.message
+    });
+  }
+};
+
+// Disconnect driver's Connect account (admin action)
+exports.disconnectDriverAccount = async (req, res) => {
+  try {
+    const { riderId } = req.params;
+
+    const rider = await Rider.findById(riderId);
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: 'Rider not found'
+      });
+    }
+
+    if (!rider.stripeConnectAccountId) {
+      return res.status(400).json({
+        success: false,
+        message: 'No Connect account found for this driver'
+      });
+    }
+
+    rider.connectAccountStatus = 'disabled';
+    rider.connectChargesEnabled = false;
+    rider.connectPayoutsEnabled = false;
+    await rider.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Driver Connect account disconnected successfully'
+    });
+  } catch (error) {
+    console.error('Disconnect driver account error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to disconnect driver account',
+      error: error.message
+    });
+  }
+};
+
+// ============================================
+// 16. CATEGORIES MANAGEMENT APIS
+// ============================================
+
+exports.getAllCategories = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, search = "" } = req.query;
+    const query = search ? { categoryDisplayName: { $regex: search, $options: "i" } } : {};
+
+    const categories = await RideType.find(query)
+      .sort({ order: 1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .lean();
+
+    const total = await RideType.countDocuments(query);
+
+    res.status(200).json({
+      success: true,
+      data: categories,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / parseInt(limit)),
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+exports.createCategory = async (req, res) => {
+  try {
+    const { category, categoryDisplayName, categoryDescription, capacity, icon, order } = req.body;
+    const rideType = await RideType.create({
+      category,
+      categoryDisplayName,
+      categoryDescription,
+      capacity,
+      icon,
+      order,
+      isActive: true,
+    });
+    res.status(201).json({
+      success: true,
+      message: "Category created successfully",
+      data: rideType,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+exports.updateCategory = async (req, res) => {
+  try {
+    const rideType = await RideType.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    res.status(200).json({
+      success: true,
+      message: "Category updated successfully",
+      data: rideType,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
+exports.deleteCategory = async (req, res) => {
+  try {
+    await RideType.findByIdAndDelete(req.params.id);
+    res.status(200).json({
+      success: true,
+      message: "Category deleted successfully",
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
 //   approveVerification,
 //   rejectVerification,
 

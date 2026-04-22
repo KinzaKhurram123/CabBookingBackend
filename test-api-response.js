@@ -1,73 +1,19 @@
-const cloudinary = require("cloudinary").v2;
-const multer = require("multer");
-const RideBooking = require("../models/rideBooking");
-const ParcelBooking = require("../models/parcelBooking");
-const PetDeliveryBooking = require("../models/petDeliveryBooking");
+const mongoose = require("mongoose");
+const dotenv = require("dotenv");
+const RideBooking = require("./models/rideBooking");
+const ParcelBooking = require("./models/parcelBooking");
+const PetDeliveryBooking = require("./models/petDeliveryBooking");
 
-exports.getUserProfile = (req, res) => {
-  res.json({
-    _id: req.user.id,
-    name: req.user.name,
-    email: req.user.email,
-  });
-};
+dotenv.config();
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
-});
-
-exports.uploadProfileImage = async (req, res) => {
+const testCurrentActiveBookingAPI = async () => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ message: "No image uploaded" });
-    }
+    await mongoose.connect(process.env.MONGO_URI);
+    console.log("✅ Connected to MongoDB\n");
 
-    const result = await new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder: "profile_images",
-          public_id: `user_${req.user._id}_${Date.now()}`,
-          transformation: [{ width: 400, height: 400, crop: "limit" }],
-        },
-        (error, result) => {
-          if (error) reject(error);
-          else resolve(result);
-        },
-      );
-      uploadStream.end(req.file.buffer);
-    });
+    const userId = "69e606987683ac9829b7e940";
+    console.log("🔍 Testing API for user:", userId);
 
-    const updatedUser = await User.findByIdAndUpdate(
-      req.user._id,
-      { profileImage: result.secure_url },
-      { new: true },
-    ).select("-password");
-
-    res.json({
-      success: true,
-      message: "Profile image updated successfully",
-      profileImage: result.secure_url,
-      user: updatedUser,
-    });
-  } catch (error) {
-    console.error("Upload error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Failed to upload image",
-    });
-  }
-};
-
-exports.getCurrentActiveBooking = async (req, res) => {
-  try {
-    const userId = req.user._id;
     const activeStatuses = ["pending", "accepted", "onTheWay", "arrived", "inProgress"];
     const allActiveBookings = [];
 
@@ -80,6 +26,7 @@ exports.getCurrentActiveBooking = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    console.log("\n🚗 Active Rides:", rideBookings.length);
     rideBookings.forEach((booking) => {
       allActiveBookings.push({
         bookingType: "ride",
@@ -102,7 +49,13 @@ exports.getCurrentActiveBooking = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    console.log("📦 Active Parcel Deliveries:", parcelBookings.length);
     parcelBookings.forEach((booking) => {
+      console.log(`   - ID: ${booking._id}`);
+      console.log(`     Status: ${booking.status}`);
+      console.log(`     Receiver: ${booking.receiverName}`);
+      console.log(`     Fare: $${booking.totalFare}`);
+
       allActiveBookings.push({
         bookingType: "parcel",
         ...booking,
@@ -124,6 +77,7 @@ exports.getCurrentActiveBooking = async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
 
+    console.log("🐾 Active Pet Deliveries:", petDeliveryBookings.length);
     petDeliveryBookings.forEach((booking) => {
       allActiveBookings.push({
         bookingType: "petDelivery",
@@ -137,22 +91,40 @@ exports.getCurrentActiveBooking = async (req, res) => {
       });
     });
 
-    // Sort all bookings by creation date (most recent first)
+    // Sort all bookings by creation date
     allActiveBookings.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    return res.status(200).json({
+    console.log("\n📊 Total Active Bookings:", allActiveBookings.length);
+
+    console.log("\n✅ API Response Preview:");
+    console.log(JSON.stringify({
       success: true,
       hasActiveBooking: allActiveBookings.length > 0,
       count: allActiveBookings.length,
-      bookings: allActiveBookings,
-      message: allActiveBookings.length === 0 ? "No active bookings found" : undefined,
-    });
+      bookings: allActiveBookings.map(b => ({
+        bookingType: b.bookingType,
+        _id: b._id,
+        status: b.status,
+        ...(b.bookingType === 'parcel' && {
+          receiverName: b.receiverName,
+          totalFare: b.totalFare,
+          pickupLocationName: b.pickupLocationName,
+          dropoffLocationName: b.dropoffLocationName,
+        }),
+        createdAt: b.createdAt,
+      })),
+    }, null, 2));
+
+    console.log("\n🎯 Now test in Postman/Thunder Client:");
+    console.log("   GET http://localhost:5000/api/users/current-active-booking");
+    console.log("   Authorization: Bearer YOUR_TOKEN");
+    console.log("\n✅ You should see the same data!");
+
+    process.exit(0);
   } catch (error) {
-    console.error("Get current active booking error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
-    });
+    console.error("❌ Error:", error.message);
+    process.exit(1);
   }
 };
+
+testCurrentActiveBookingAPI();

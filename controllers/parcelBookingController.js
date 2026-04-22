@@ -4,39 +4,40 @@ const User = require("../models/user");
 const Rider = require("../models/riderModel");
 const stripe = require("../config/stripe");
 const pusher = require("../config/pusher");
+const { calculateParcelFare } = require("../utils/fareCalculator");
 const geolib = require("geolib");
 
-const calculateParcelFare = (
-  distance,
-  vehicleType,
-  weight,
-  numberOfPackages,
-  fragileItem = false,
-) => {
-  let baseFare = 0;
-  switch (vehicleType) {
-    case "bike":
-      baseFare = 5;
-      break;
-    case "car":
-      baseFare = 10;
-      break;
-    case "van":
-      baseFare = 15;
-      break;
-    case "truck":
-      baseFare = 25;
-      break;
-    default:
-      baseFare = 10;
-  }
-  const distanceFare = distance * 1.5;
-  const weightFare = weight * 0.5;
-  const packageFare = numberOfPackages * 1;
-  const fragileSurcharge = fragileItem ? baseFare * 0.2 : 0; // 20% surcharge for fragile items
+// const calculateParcelFare = (
+//   distance,
+//   vehicleType,
+//   weight,
+//   numberOfPackages,
+//   fragileItem = false,
+// ) => {
+//   let baseFare = 0;
+//   switch (vehicleType) {
+//     case "bike":
+//       baseFare = 5;
+//       break;
+//     case "car":
+//       baseFare = 10;
+//       break;
+//     case "van":
+//       baseFare = 15;
+//       break;
+//     case "truck":
+//       baseFare = 25;
+//       break;
+//     default:
+//       baseFare = 10;
+//   }
+//   const distanceFare = distance * 1.5;
+//   const weightFare = weight * 0.5;
+//   const packageFare = numberOfPackages * 1;
+//   const fragileSurcharge = fragileItem ? baseFare * 0.2 : 0; // 20% surcharge for fragile items
 
-  return baseFare + distanceFare + weightFare + packageFare + fragileSurcharge;
-};
+//   return baseFare + distanceFare + weightFare + packageFare + fragileSurcharge;
+// };
 
 const estimateDeliveryTime = (distance, vehicleType) => {
   let speed = 0;
@@ -145,15 +146,15 @@ exports.createParcelBooking = async (req, res) => {
     }
 
     const distance = calculateDistance(pickupLocation, dropoffLocation);
-
-    const totalFare = calculateParcelFare(
-      distance,
-      selectedVehicle,
-      weight,
-      numberOfPackages,
-      fragileItem,
-    );
     const estimateTime = estimateDeliveryTime(distance, selectedVehicle);
+
+    const fareResult = calculateParcelFare(
+      distance,
+      estimateTime,
+      weight,
+      new Date(),
+    );
+    const totalFare = fareResult.totalFare;
 
     let paymentIntent = null;
 
@@ -272,9 +273,16 @@ exports.createParcelBooking = async (req, res) => {
 
     // Trigger on a global parcel channel so all nearby drivers listening get it
     try {
-      await pusher.trigger("parcel-bookings", "new-parcel-booking", pusherPayload);
+      await pusher.trigger(
+        "parcel-bookings",
+        "new-parcel-booking",
+        pusherPayload,
+      );
     } catch (pusherError) {
-      console.error("Pusher trigger error (non-critical):", pusherError.message);
+      console.error(
+        "Pusher trigger error (non-critical):",
+        pusherError.message,
+      );
     }
 
     // Also trigger on each individual rider's personal channel
@@ -286,7 +294,10 @@ exports.createParcelBooking = async (req, res) => {
           pusherPayload,
         );
       } catch (pusherError) {
-        console.error(`Pusher error for rider ${rider._id}:`, pusherError.message);
+        console.error(
+          `Pusher error for rider ${rider._id}:`,
+          pusherError.message,
+        );
       }
     }
 
@@ -567,7 +578,7 @@ exports.driverCancelParcelDelivery = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { cancellationReason } = req.body;
-    const driverId = req.user._id;
+    const driverId = req.rider._id;
 
     if (!bookingId) {
       return res.status(400).json({
@@ -775,7 +786,8 @@ exports.acceptParcelDelivery = async (req, res) => {
     if (!rider.isVerified) {
       return res.status(403).json({
         success: false,
-        message: "Your account is not verified yet. Please wait for admin approval.",
+        message:
+          "Your account is not verified yet. Please wait for admin approval.",
         verificationStatus: rider.verificationStatus,
       });
     }
@@ -784,11 +796,18 @@ exports.acceptParcelDelivery = async (req, res) => {
     const existingBooking = await ParcelBooking.findById(bookingId);
 
     if (!existingBooking) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
     if (existingBooking.user.toString() === rider.user.toString()) {
-      return res.status(400).json({ success: false, message: "You cannot accept your own parcel delivery booking" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "You cannot accept your own parcel delivery booking",
+        });
     }
 
     if (existingBooking.status !== "pending") {
@@ -799,13 +818,55 @@ exports.acceptParcelDelivery = async (req, res) => {
     }
 
     if (existingBooking.driver) {
-      return res.status(400).json({ success: false, message: "Already accepted by another driver" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Already accepted by another driver",
+        });
+    }
+
+    if (existingBooking.paymentType === "Card") {
+      if (!rider.stripeConnectAccountId) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Driver payment account not set up. Please complete Stripe Connect onboarding.",
+          requiresConnectOnboarding: true,
+        });
+      }
+
+      if (!rider.connectChargesEnabled) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "Driver payment account not enabled. Please complete onboarding.",
+          requiresConnectOnboarding: true,
+        });
+      }
+
+      if (existingBooking.paymentIntentId) {
+        const stripe = require("../config/stripe");
+        const applicationFee = Math.round(existingBooking.fare * 0.2 * 100);
+        await stripe.paymentIntents.update(existingBooking.paymentIntentId, {
+          application_fee_amount: applicationFee,
+          transfer_data: {
+            destination: rider.stripeConnectAccountId,
+          },
+          metadata: {
+            driverId: rider._id.toString(),
+            driverConnectAccountId: rider.stripeConnectAccountId,
+          },
+        });
+      }
     }
 
     // Direct update
     await ParcelBooking.updateOne(
       { _id: bookingId },
-      { $set: { status: "accepted", driver: rider._id, acceptedAt: new Date() } }
+      {
+        $set: { status: "accepted", driver: rider._id, acceptedAt: new Date() },
+      },
     );
 
     const booking = await ParcelBooking.findById(bookingId);
@@ -1154,7 +1215,9 @@ exports.completeParcelDelivery = async (req, res) => {
           booking.paymentIntentId,
         );
         booking.paymentStatus = "captured";
-        console.log(`Payment captured for parcel delivery ${bookingId}`);
+        console.log(
+          `Payment captured for parcel delivery ${bookingId} - 80% automatically transferred to driver via Stripe Connect`,
+        );
       } catch (paymentError) {
         console.error("Payment capture error:", paymentError.message);
         // Continue with completion even if payment capture fails
@@ -1172,13 +1235,14 @@ exports.completeParcelDelivery = async (req, res) => {
           $inc: {
             totalRides: 1,
             totalEarning: parseFloat((booking.totalFare * 0.8).toFixed(2)),
-            walletBalance: parseFloat((booking.totalFare * 0.8).toFixed(2)),
           },
         },
         { new: true },
       );
 
-      console.log(`Driver ${riderId} status updated to available`);
+      console.log(
+        `Driver ${riderId} status updated to available (paid via Stripe Connect)`,
+      );
     } catch (driverUpdateError) {
       console.error("Driver status update error:", driverUpdateError.message);
     }
@@ -1245,7 +1309,7 @@ exports.updateParcelDeliveryDriverLocation = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { latitude, longitude } = req.body;
-    const driverId = req.user?._id;
+    const driverId = req.rider?._id;
 
     if (!latitude || !longitude) {
       return res.status(400).json({

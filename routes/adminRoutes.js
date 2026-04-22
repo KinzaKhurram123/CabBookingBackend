@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { protect, authorize } = require("../middleware/authMiddleware");
+const { protectAdmin, superAdminOnly, checkPermission } = require("../middleware/adminMiddleware");
 const {
   // ===== AUTHENTICATION =====
   adminLogin,
@@ -75,6 +75,12 @@ const {
   approveVerification,
   rejectVerification,
 
+  // ===== CATEGORIES =====
+  getAllCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+
   // ===== RECENT ACTIVITY =====
   getRecentActivities,
 
@@ -116,8 +122,7 @@ router.post("/refresh-token", refreshToken);
 // ============================================
 // PROTECTED ROUTES (Authentication Required)
 // ============================================
-router.use(protect);
-router.use(authorize("admin"));
+router.use(protectAdmin);
 
 // ===== AUTH =====
 router.post("/logout", adminLogout);
@@ -200,6 +205,12 @@ router.get("/driver-verifications/pending", getPendingVerifications);
 router.get("/driver-verifications/:id", getVerificationById);
 router.post("/driver-verifications/:id/approve", approveVerification);
 router.post("/driver-verifications/:id/reject", rejectVerification);
+
+// ===== CATEGORIES =====
+router.get("/categories", getAllCategories);
+router.post("/categories", createCategory);
+router.put("/categories/:id", updateCategory);
+router.delete("/categories/:id", deleteCategory);
 
 // ===== RECENT ACTIVITY =====
 router.get("/recent-activities", getRecentActivities);

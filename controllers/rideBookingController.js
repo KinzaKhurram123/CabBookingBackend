@@ -7,22 +7,117 @@ const petDeliveryBooking = require("../models/petDeliveryBooking");
 const { chargeCard } = require("./paymentController");
 const stripe = require("../config/stripe");
 const pusher = require("../config/pusher");
+const { calculateRideFare } = require("../utils/fareCalculator");
 
-// function calculateDistance(lat1, lon1, lat2, lon2) {
-//   const R = 6371;
-//   const dLat = ((lat2 - lat1) * Math.PI) / 180;
-//   const dLon = ((lon2 - lon1) * Math.PI) / 180;
+// ─── HELPER: Build full populated ride Pusher payload ──────────────────────
+const buildRidePusherPayload = async (bookingId, status) => {
+  const booking = await RideBooking.findById(bookingId)
+    .populate("user", "name email phoneNumber profileImage")
+    .populate({
+      path: "driver",
+      select: "phoneNumber vehicleDetails rating totalRides location",
+      populate: { path: "user", select: "name email phoneNumber profileImage" },
+    })
+    .lean();
 
-//   const a =
-//     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-//     Math.cos((lat1 * Math.PI) / 180) *
-//       Math.cos((lat2 * Math.PI) / 180) *
-//       Math.sin(dLon / 2) *
-//       Math.sin(dLon / 2);
+  if (!booking) return null;
 
-//   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-//   return R * c;
-// }
+  return {
+    bookingId: booking._id,
+    type: "cab",
+    status,
+
+    booking: {
+      id: booking._id,
+      status: booking.status,
+      category: booking.category,
+      fare: booking.fare,
+      price: booking.price,
+      distance: booking.distance
+        ? `${parseFloat(booking.distance).toFixed(2)} km`
+        : null,
+      distanceRaw: booking.distance ? parseFloat(booking.distance) : null,
+      duration: booking.duration
+        ? `${Math.round(parseFloat(booking.duration))} mins`
+        : null,
+      durationRaw: booking.duration ? parseFloat(booking.duration) : null,
+      time: booking.time,
+      date: booking.date,
+      paymentMethod: booking.paymentMethod,
+      paymentType: booking.paymentType,
+      paymentStatus: booking.paymentStatus,
+      selectedVehicle: booking.selectedVehicle || null,
+      pickup: {
+        name: booking.pickupLocationName,
+        coordinates: booking.pickupLocation?.coordinates
+          ? {
+              lat: booking.pickupLocation.coordinates[1],
+              lng: booking.pickupLocation.coordinates[0],
+            }
+          : null,
+      },
+      dropoff: {
+        name: booking.dropoffLocationName,
+        coordinates: booking.dropoffLocation
+          ? {
+              lat: booking.dropoffLocation.lat,
+              lng: booking.dropoffLocation.lng,
+            }
+          : null,
+      },
+      timestamps: {
+        booked: booking.createdAt,
+        accepted: booking.acceptedAt || null,
+        onTheWay: booking.onTheWayAt || null,
+        arrived: booking.arrivedAt || null,
+        started: booking.startedAt || null,
+        completed: booking.completedAt || null,
+      },
+      cancellationDetails: booking.cancellationDetails || null,
+      statusHistory: booking.statusHistory || [],
+    },
+
+    user: booking.user
+      ? {
+          id: booking.user._id,
+          name: booking.user.name,
+          email: booking.user.email,
+          phone: booking.user.phoneNumber,
+          profileImage: booking.user.profileImage,
+        }
+      : null,
+
+    driver: booking.driver
+      ? {
+          id: booking.driver._id,
+          name: booking.driver.user?.name,
+          email: booking.driver.user?.email,
+          phone: booking.driver.user?.phoneNumber || booking.driver.phoneNumber,
+          profileImage: booking.driver.user?.profileImage,
+          rating: booking.driver.rating,
+          totalRides: booking.driver.totalRides,
+          currentLocation: booking.driver.location?.coordinates
+            ? {
+                lat: booking.driver.location.coordinates[1],
+                lng: booking.driver.location.coordinates[0],
+              }
+            : null,
+          vehicle: {
+            category: booking.driver.vehicleDetails?.category || null,
+            type: booking.driver.vehicleDetails?.vehicleType || null,
+            make: booking.driver.vehicleDetails?.make || null,
+            model: booking.driver.vehicleDetails?.model || null,
+            year: booking.driver.vehicleDetails?.year || null,
+            color: booking.driver.vehicleDetails?.color || null,
+            licensePlate: booking.driver.vehicleDetails?.licensePlate || null,
+            vehicleNumber: booking.driver.vehicleDetails?.vehicleNumber || null,
+          },
+        }
+      : null,
+
+    timestamp: new Date().toISOString(),
+  };
+};
 
 function calculateDistance(lat1, lon1, lat2, lon2) {
   // Ensure numbers
@@ -76,7 +171,44 @@ function getStatusProgress(status) {
   return statusOrder[status] || 0;
 }
 
-exports.createRideBooking = async (req, res) => {
+// Fare Estimation Endpoint
+const estimateFare = async (req, res) => {
+  try {
+    const { distance, time, bookingTime } = req.body;
+
+    if (!distance || distance <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Distance in miles is required and must be greater than 0",
+      });
+    }
+
+    if (!time || time <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Time in minutes is required and must be greater than 0",
+      });
+    }
+
+    const bookingDate = bookingTime ? new Date(bookingTime) : new Date();
+    const fareDetails = calculateRideFare(distance, time, bookingDate);
+
+    return res.status(200).json({
+      success: true,
+      message: "Fare estimated successfully",
+      data: fareDetails,
+    });
+  } catch (error) {
+    console.error("Fare estimation error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to estimate fare",
+      error: error.message,
+    });
+  }
+};
+
+const createRideBooking = async (req, res) => {
   try {
     const requiredFields = ["category", "pickupLocation"];
     for (let field of requiredFields) {
@@ -102,6 +234,20 @@ exports.createRideBooking = async (req, res) => {
       });
     }
 
+    if (
+      !req.body.pickupLocation?.coordinates ||
+      !Array.isArray(req.body.pickupLocation.coordinates) ||
+      req.body.pickupLocation.coordinates.length !== 2 ||
+      req.body.pickupLocation.coordinates.some(
+        (coord) => coord === null || coord === undefined,
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid pickup location coordinates",
+      });
+    }
+
     const user = await User.findById(req.user._id).select("-password");
     if (!user) {
       return res.status(404).json({
@@ -120,30 +266,72 @@ exports.createRideBooking = async (req, res) => {
 
     const dropoffLocation =
       req.body.dropoffLocation || req.body.dropOffLocation;
-    const fare = req.body.fare || req.body.price || 0;
+
+    let fare = req.body.fare || req.body.price || 0;
+    let fareBreakdown = null;
+
+    if (!fare && req.body.distance && req.body.time) {
+      const distanceInMiles = parseFloat(req.body.distance);
+      const timeInMinutes = parseFloat(req.body.time);
+      const bookingDate = req.body.bookingTime
+        ? new Date(req.body.bookingTime)
+        : new Date();
+
+      const fareDetails = calculateRideFare(
+        distanceInMiles,
+        timeInMinutes,
+        bookingDate,
+      );
+      fare = fareDetails.totalFare;
+      fareBreakdown = fareDetails;
+    }
 
     let paymentIntent = null;
-
     if (req.body.paymentMethod === "Card") {
-      paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(fare * 100),
-        currency: "usd",
-        customer: user.stripeCustomerId,
-        payment_method: user.defaultPaymentMethod,
-        capture_method: "manual",
-        metadata: {
-          bookingType: "ride",
-          userId: req.user._id.toString(),
-          pickupLocation: JSON.stringify(req.body.pickupLocation),
-          dropLocation: JSON.stringify(dropoffLocation),
-          fare: fare.toString(),
-          vehicleId:
-            req.body.selectedVehicle.id || req.body.selectedVehicle.vehicleId,
-          vehicleName: req.body.selectedVehicle.name,
-        },
-        confirm: true,
-        off_session: true,
-      });
+      try {
+        paymentIntent = await stripe.paymentIntents.create({
+          amount: Math.round(fare * 100),
+          currency: "usd",
+          customer: user.stripeCustomerId,
+          payment_method: user.defaultPaymentMethod,
+          capture_method: "manual",
+          metadata: {
+            bookingType: "ride",
+            userId: req.user._id.toString(),
+            pickupLocation: JSON.stringify(req.body.pickupLocation),
+            dropLocation: JSON.stringify(dropoffLocation),
+            fare: fare.toString(),
+            vehicleId:
+              req.body.selectedVehicle.id || req.body.selectedVehicle.vehicleId,
+            vehicleName: req.body.selectedVehicle.name,
+          },
+          confirm: true,
+          off_session: true,
+        });
+      } catch (stripeError) {
+        console.error("Stripe payment error:", stripeError);
+        if (stripeError.type === "StripeCardError") {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Your card was declined. Please use a different payment method.",
+            error: stripeError.message,
+          });
+        }
+        if (stripeError.code === "authentication_required") {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Authentication required for this payment. Please try again.",
+            requiresAuthentication: true,
+          });
+        }
+        return res.status(400).json({
+          success: false,
+          message: "Payment processing failed",
+          error: stripeError.message,
+        });
+      }
     }
 
     const rideBooking = new RideBooking({
@@ -151,7 +339,7 @@ exports.createRideBooking = async (req, res) => {
       category: req.body.category,
       pickupLocation: req.body.pickupLocation,
       dropoffLocation: dropoffLocation,
-      fare: req.body.fare,
+      fare: fare,
       distance: req.body.distance,
       time: req.body.time,
       paymentIntentId: paymentIntent ? paymentIntent.id : null,
@@ -163,7 +351,7 @@ exports.createRideBooking = async (req, res) => {
       dropoffLocationName: req.body.dropoffLocationName,
       duration: req.body.duration,
       paymentMethod: req.body.paymentMethod || "cash",
-      price: req.body.price,
+      price: fare,
       selectedVehicle: {
         id: req.body.selectedVehicle.id || req.body.selectedVehicle.vehicleId,
         name: req.body.selectedVehicle.name,
@@ -176,6 +364,8 @@ exports.createRideBooking = async (req, res) => {
     });
 
     const savedBooking = await rideBooking.save();
+
+    // Populate the booking
     const populatedBooking = await RideBooking.findById(savedBooking._id)
       .populate({
         path: "user",
@@ -183,25 +373,23 @@ exports.createRideBooking = async (req, res) => {
       })
       .lean();
 
+    // Find nearby riders
     const pickupCoords = populatedBooking.pickupLocation?.coordinates;
-    if (!pickupCoords || pickupCoords.includes(null)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid pickup location coordinates",
-      });
-    }
+    let nearbyRiders = [];
 
-    const nearbyRiders = await Rider.find({
-      location: {
-        $near: {
-          $geometry: {
-            type: "Point",
-            coordinates: pickupCoords,
+    if (pickupCoords && !pickupCoords.includes(null)) {
+      nearbyRiders = await Rider.find({
+        location: {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: pickupCoords,
+            },
+            $maxDistance: 20000,
           },
-          $maxDistance: 20000,
         },
-      },
-    });
+      }).select("-password -__v");
+    }
 
     const estimatedArrival = calculateEstimatedArrival(
       populatedBooking.duration,
@@ -232,6 +420,7 @@ exports.createRideBooking = async (req, res) => {
       );
     }
 
+    // Notify individual riders
     for (const rider of nearbyRiders) {
       try {
         await pusher.trigger(
@@ -247,6 +436,7 @@ exports.createRideBooking = async (req, res) => {
       }
     }
 
+    // Return response
     return res.status(201).json({
       success: true,
       message: "Ride booked successfully",
@@ -255,22 +445,23 @@ exports.createRideBooking = async (req, res) => {
         estimatedArrival,
         paymentStatus: paymentIntent ? "authorized" : "pending",
         paymentType: req.body.paymentMethod === "Card" ? "Card" : "Cash",
-        customerDetails: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          phone: user.phone,
-          profileImage: user.profileImage,
-        },
-        selectedVehicle: {
-          id: req.body.selectedVehicle.id || req.body.selectedVehicle.vehicleId,
-          name: req.body.selectedVehicle.name,
-          features: req.body.selectedVehicle.features,
-          capacity: req.body.selectedVehicle.capacity,
-          price: req.body.selectedVehicle.price || "varies",
-          time:
-            req.body.selectedVehicle.time || "Real time in Minutes, wait time",
-        },
+        fareBreakdown: fareBreakdown || null,
+      },
+      customerDetails: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        profileImage: user.profileImage,
+      },
+      selectedVehicle: {
+        id: req.body.selectedVehicle.id || req.body.selectedVehicle.vehicleId,
+        name: req.body.selectedVehicle.name,
+        features: req.body.selectedVehicle.features,
+        capacity: req.body.selectedVehicle.capacity,
+        price: req.body.selectedVehicle.price || "varies",
+        time:
+          req.body.selectedVehicle.time || "Real time in Minutes, wait time",
       },
       summary: {
         bookingId: populatedBooking._id,
@@ -284,11 +475,18 @@ exports.createRideBooking = async (req, res) => {
         vehicleName: req.body.selectedVehicle.name,
         vehicleCapacity: req.body.selectedVehicle.capacity,
       },
-      nearbyRiders,
+      nearbyRidersCount: nearbyRiders.length,
+      nearbyRiders: nearbyRiders.map((rider) => ({
+        id: rider._id,
+        name: rider.name,
+        rating: rider.rating,
+        vehicleType: rider.vehicleType,
+      })),
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error("Create ride error:", error);
+
     if (error.type === "StripeCardError") {
       return res.status(400).json({
         success: false,
@@ -305,78 +503,32 @@ exports.createRideBooking = async (req, res) => {
         requiresAuthentication: true,
       });
     }
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: "Duplicate booking detected. Please try again.",
+      });
+    }
+
+    if (error.name === "ValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: "Validation error",
+        errors: Object.values(error.errors).map((e) => e.message),
+      });
+    }
+
     return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : undefined,
       stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
     });
   }
 };
 
-// exports.getNearbyRides = async (req, res) => {
-//   try {
-//     console.log("req.query:", req.query);
-//     console.log("req.body:", req.body);
-
-//     let { latitude, longitude, radius = 5 } = req.query;
-
-//     if (!latitude || !longitude) {
-//       return res.status(400).json({
-//         message: "latitude & longitude required",
-//         debug: { query: req.query, body: req.body },
-//       });
-//     }
-
-//     latitude = Number(latitude);
-//     longitude = Number(longitude);
-//     radius = Number(radius) * 1000;
-
-//     console.log("User:", latitude, longitude);
-
-//     const rides = await RideBooking.find({
-//       pickupLocation: {
-//         $near: {
-//           $geometry: {
-//             type: "Point",
-//             coordinates: [longitude, latitude],
-//           },
-//           $maxDistance: radius,
-//         },
-//       },
-//     })
-//       .populate("user")
-//       .lean();
-
-//     console.log("Found rides:", rides.length);
-
-//     const result = rides.map((ride) => {
-//       const lng = ride.pickupLocation.coordinates[0];
-//       const lat = ride.pickupLocation.coordinates[1];
-
-//       const distance = calculateDistance(latitude, longitude, lat, lng);
-//       console.log(distance, "distanceeeeeeeeee");
-
-//       return {
-//         ...ride,
-//         distance: distance.toFixed(2) + " km",
-//       };
-//     });
-
-//     res.json({
-//       success: true,
-//       count: result.length,
-//       rides: result,
-//     });
-//   } catch (err) {
-//     console.log(err);
-//     res.status(500).json({
-//       error: err.message,
-//     });
-//   }
-// };
-
-exports.getNearbyRides = async (req, res) => {
+const getNearbyRides = async (req, res) => {
   try {
     let { latitude, longitude, radius = 5 } = req.query;
 
@@ -405,7 +557,7 @@ exports.getNearbyRides = async (req, res) => {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [longitude, latitude], // ✅ correct
+            coordinates: [longitude, latitude],
           },
           $maxDistance: radius,
         },
@@ -416,7 +568,6 @@ exports.getNearbyRides = async (req, res) => {
 
     console.log("Found rides:", rides.length);
 
-    // ✅ No calculation — just return DB data
     const result = rides.map((ride) => ({
       ...ride,
       distance: ride.distance ? `${ride.distance} km` : null,
@@ -436,7 +587,7 @@ exports.getNearbyRides = async (req, res) => {
   }
 };
 
-exports.getAllRides = async (req, res) => {
+const getAllRides = async (req, res) => {
   try {
     const {
       status,
@@ -497,13 +648,16 @@ exports.getAllRides = async (req, res) => {
 
     const totalRides = await RideBooking.countDocuments(filter);
 
+    // ✅ FIX: Return both "rides" AND "bookings" for compatibility
     res.status(200).json({
       success: true,
       count: rides.length,
       total: totalRides,
       page: parseInt(page),
       totalPages: Math.ceil(totalRides / parseInt(limit)),
-      rides: rides,
+      rides: rides,        // For your existing frontend
+      bookings: rides,     // For parcel booking component
+      data: rides,         // Generic fallback
     });
   } catch (error) {
     console.error("Get all rides error:", error);
@@ -515,7 +669,7 @@ exports.getAllRides = async (req, res) => {
   }
 };
 
-exports.acceptRide = async (req, res) => {
+const acceptRide = async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
@@ -616,6 +770,45 @@ exports.acceptRide = async (req, res) => {
       });
     }
 
+    if (booking.paymentType === "Card") {
+      if (!rider.stripeConnectAccountId) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(403).json({
+          success: false,
+          message:
+            "Driver payment account not set up. Please complete Stripe Connect onboarding.",
+          requiresConnectOnboarding: true,
+        });
+      }
+
+      if (!rider.connectChargesEnabled) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(403).json({
+          success: false,
+          message:
+            "Driver payment account not enabled. Please complete onboarding.",
+          requiresConnectOnboarding: true,
+        });
+      }
+
+      if (booking.paymentIntentId) {
+        const applicationFee = Math.round(booking.fare * 0.2 * 100);
+        await stripe.paymentIntents.update(booking.paymentIntentId, {
+          application_fee_amount: applicationFee,
+          transfer_data: {
+            destination: rider.stripeConnectAccountId,
+          },
+          metadata: {
+            ...booking.paymentIntentId.metadata,
+            driverId: rider._id.toString(),
+            driverConnectAccountId: rider.stripeConnectAccountId,
+          },
+        });
+      }
+    }
+
     booking.status = "accepted";
     booking.driver = rider._id;
     booking.acceptedAt = new Date();
@@ -632,21 +825,23 @@ exports.acceptRide = async (req, res) => {
       .populate("user", "name email phoneNumber profileImage")
       .populate({
         path: "driver",
-        populate: { path: "user", select: "name email phoneNumber" },
-      });
+        select: "phoneNumber vehicleDetails rating totalRides location",
+        populate: {
+          path: "user",
+          select: "name email phoneNumber profileImage",
+        },
+      })
+      .lean();
 
     try {
-      await pusher.trigger(`ride-${bookingId}`, "ride-status-update", {
-        bookingId,
-        status: "accepted",
-        driver: {
-          id: rider._id,
-          name: rider.user?.name,
-        },
-        timestamp: new Date().toISOString(),
-      });
+      const channelName = `ride-${bookingId}`;
+      const payload = await buildRidePusherPayload(bookingId, "accepted");
+      if (payload) {
+        await pusher.trigger(channelName, "ride-status-update", payload);
+        console.log("✅ Pusher trigger successful - accepted");
+      }
     } catch (pusherError) {
-      console.error("Pusher error (non-critical):", pusherError.message);
+      console.error("❌ Pusher error:", pusherError.message);
     }
 
     res.status(200).json({
@@ -673,7 +868,7 @@ exports.acceptRide = async (req, res) => {
   }
 };
 
-exports.debugNearbyRides = async (req, res) => {
+const debugNearbyRides = async (req, res) => {
   try {
     const { latitude, longitude } = req.query;
 
@@ -715,7 +910,7 @@ exports.debugNearbyRides = async (req, res) => {
   }
 };
 
-exports.testRideStructure = async (req, res) => {
+const testRideStructure = async (req, res) => {
   try {
     const sample = await RideBooking.findOne();
     res.json({
@@ -727,9 +922,9 @@ exports.testRideStructure = async (req, res) => {
   }
 };
 
-exports.getAllRidesForDriver = async (req, res) => {
+const getAllRidesForDriver = async (req, res) => {
   try {
-    const driverId = req.user._id;
+    const driverId = req.rider._id;
     const rides = await RideBooking.find({ driver: driverId });
     res.status(200).json({
       success: true,
@@ -746,7 +941,7 @@ exports.getAllRidesForDriver = async (req, res) => {
   }
 };
 
-exports.cancelRideBooking = async (req, res) => {
+const cancelRideBooking = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { cancellationReason, cancelledBy = "user" } = req.body;
@@ -830,12 +1025,15 @@ exports.cancelRideBooking = async (req, res) => {
         `Booking ${bookingId} cancelled. Driver ${booking.driver} notified.`,
       );
       try {
-        await pusher.trigger(`ride-${bookingId}`, "ride-status-update", {
-          bookingId,
-          status: "cancelled",
-          cancelledBy: "user",
-          timestamp: new Date().toISOString(),
-        });
+        const payload = await buildRidePusherPayload(bookingId, "cancelled");
+        if (payload) {
+          await pusher.trigger(
+            `ride-${bookingId}`,
+            "ride-status-update",
+            payload,
+          );
+          console.log("✅ Pusher trigger successful - cancelled");
+        }
       } catch (pusherError) {
         console.error("Pusher error (non-critical):", pusherError.message);
       }
@@ -861,11 +1059,11 @@ exports.cancelRideBooking = async (req, res) => {
   }
 };
 
-exports.driverCancelRideBooking = async (req, res) => {
+const driverCancelRideBooking = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { cancellationReason } = req.body;
-    const driverId = req.user._id;
+    const driverId = req.rider._id;
 
     if (!bookingId) {
       return res.status(400).json({
@@ -957,7 +1155,7 @@ exports.driverCancelRideBooking = async (req, res) => {
   }
 };
 
-exports.adminCancelRideBooking = async (req, res) => {
+const adminCancelRideBooking = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { cancellationReason } = req.body;
@@ -1012,7 +1210,7 @@ exports.adminCancelRideBooking = async (req, res) => {
   }
 };
 
-exports.getCancelledBookings = async (req, res) => {
+const getCancelledBookings = async (req, res) => {
   try {
     const userId = req.user._id;
     const { page = 1, limit = 10 } = req.query;
@@ -1051,72 +1249,127 @@ exports.getCancelledBookings = async (req, res) => {
   }
 };
 
-exports.getUserRideHistory = async (req, res) => {
+const getUserRideHistory = async (req, res) => {
   try {
     const { userId } = req.params;
-    const cabRides = await RideBooking.find({ user: userId });
-    const parcelRides = await parcelBooking.find({ user: userId });
-    const petRides = await petDeliveryBooking.find({ user: userId });
+    const { page = 1, limit = 20, status } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const formattedCab = cabRides.map((ride) => ({
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const statusFilter = status ? { status } : {};
+
+    // Query only cab rides for now (simplified version)
+    const cabRides = await RideBooking.find({ user: userId, ...statusFilter })
+      .populate({
+        path: "user",
+        select: "name email phoneNumber profileImage",
+      })
+      .populate({
+        path: "driver",
+        populate: {
+          path: "user",
+        },
+      })
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip(skip)
+      .lean();
+
+    const total = await RideBooking.countDocuments({ user: userId, ...statusFilter });
+
+    const formattedRides = cabRides.map((ride) => ({
       id: ride._id,
+      bookingId: ride._id,
       type: "cab",
-      pickupLocation: ride.pickupLocation,
-      dropOffLocation: ride.dropoffLocation,
-      pickupLocationName: ride.pickupLocationName,
-      dropoffLocationName: ride.dropoffLocationName,
-      price: ride.price,
+      category: ride.category,
+      user: {
+        id: ride.user?._id,
+        name: ride.user?.name,
+        email: ride.user?.email,
+        phone: ride.user?.phoneNumber,
+        profileImage: ride.user?.profileImage,
+      },
+      driver: ride.driver ? {
+        id: ride.driver._id,
+        name: ride.driver.user?.name || null,
+        email: ride.driver.user?.email || null,
+        phone: ride.driver.user?.phoneNumber || ride.driver.phoneNumber || null,
+        profileImage: ride.driver.user?.profileImage || null,
+        rating: ride.driver.rating || 5,
+        totalRides: ride.driver.totalRides || 0,
+        vehicle: {
+          category: ride.driver.vehicleDetails?.category || null,
+          type: ride.driver.vehicleDetails?.vehicleType || null,
+          make: ride.driver.vehicleDetails?.make || null,
+          model: ride.driver.vehicleDetails?.model || null,
+          licensePlate: ride.driver.vehicleDetails?.licensePlate || null,
+        },
+      } : null,
+      pickup: {
+        name: ride.pickupLocationName,
+        coordinates: ride.pickupLocation?.coordinates
+          ? {
+              lat: ride.pickupLocation.coordinates[1],
+              lng: ride.pickupLocation.coordinates[0],
+            }
+          : null,
+      },
+      dropoff: {
+        name: ride.dropoffLocationName,
+        coordinates: ride.dropoffLocation
+          ? { lat: ride.dropoffLocation.lat, lng: ride.dropoffLocation.lng }
+          : null,
+      },
       status: ride.status,
-      created_at: ride.created_at,
+      fare: ride.fare || ride.price || null,
+      distance: ride.distance ? `${parseFloat(ride.distance).toFixed(2)} km` : null,
+      duration: ride.duration ? `${Math.round(parseFloat(ride.duration))} mins` : null,
+      payment: {
+        method: ride.paymentMethod,
+        type: ride.paymentType,
+        status: ride.paymentStatus,
+      },
+      timestamps: {
+        booked: ride.createdAt,
+        accepted: ride.acceptedAt || null,
+        completed: ride.completedAt || null,
+      },
+      created_at: ride.createdAt,
+      updated_at: ride.updatedAt,
     }));
-
-    const formattedParcel = parcelRides.map((ride) => ({
-      id: ride._id,
-      type: "parcel",
-      pickupLocation: ride.pickupLocation,
-      dropOffLocation: ride.dropoffLocation,
-      pickupLocationName: ride.pickupLocationName,
-      dropoffLocationName: ride.dropoffLocationName,
-      price: ride.price,
-      status: ride.status,
-      created_at: ride.created_at,
-    }));
-
-    const formattedPet = petRides.map((ride) => ({
-      id: ride._id,
-      type: "pet",
-      pickupLocation: ride.pickupLocation,
-      dropOffLocation: ride.dropOffLocation,
-      pickupLocationName: ride.pickupLocationName,
-      dropoffLocationName: ride.dropoffLocationName,
-      price: ride.price,
-      status: ride.status,
-      created_at: ride.created_at,
-    }));
-
-    const allRides = [
-      ...formattedCab,
-      ...formattedParcel,
-      ...formattedPet,
-    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     res.status(200).json({
+      success: true,
       message: "User ride history fetched successfully",
-      data: allRides,
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        totalPages: Math.ceil(total / parseInt(limit)),
+      },
+      data: formattedRides,
     });
   } catch (error) {
+    console.error("Get ride history error:", error);
     res.status(500).json({
+      success: false,
       message: "Server error",
       error: error.message,
     });
   }
 };
 
-exports.riderOnTheWay = async (req, res) => {
+const riderOnTheWay = async (req, res) => {
   try {
     const { bookingId } = req.params;
     let { currentLocation } = req.body;
-    const riderId = req.user?._id;
+    const riderId = req.rider?._id;
 
     if (!riderId) {
       return res.status(401).json({
@@ -1147,7 +1400,6 @@ exports.riderOnTheWay = async (req, res) => {
       });
     }
 
-    // Allow from 'accepted' status only
     if (booking.status !== "accepted") {
       return res.status(400).json({
         success: false,
@@ -1173,11 +1425,12 @@ exports.riderOnTheWay = async (req, res) => {
     await booking.save();
 
     try {
-      await pusher.trigger(`ride-${bookingId}`, "ride-status-update", {
-        bookingId,
-        status: "onTheWay",
-        timestamp: new Date().toISOString(),
-      });
+      const channelName = `ride-${bookingId}`;
+      const payload = await buildRidePusherPayload(bookingId, "onTheWay");
+      if (payload) {
+        await pusher.trigger(channelName, "ride-status-update", payload);
+        console.log("✅ Pusher trigger successful - onTheWay");
+      }
     } catch (pusherError) {
       console.error("Pusher error (non-critical):", pusherError.message);
     }
@@ -1202,10 +1455,10 @@ exports.riderOnTheWay = async (req, res) => {
   }
 };
 
-exports.reachedPickup = async (req, res) => {
+const reachedPickup = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider._id;
 
     const booking = await RideBooking.findById(bookingId);
     if (!booking) {
@@ -1246,11 +1499,15 @@ exports.reachedPickup = async (req, res) => {
     await booking.save();
 
     try {
-      await pusher.trigger(`ride-${bookingId}`, "ride-status-update", {
-        bookingId,
-        status: "arrived",
-        timestamp: new Date().toISOString(),
-      });
+      const payload = await buildRidePusherPayload(bookingId, "arrived");
+      if (payload) {
+        await pusher.trigger(
+          `ride-${bookingId}`,
+          "ride-status-update",
+          payload,
+        );
+        console.log("✅ Pusher trigger successful - arrived");
+      }
     } catch (pusherError) {
       console.error("Pusher error (non-critical):", pusherError.message);
     }
@@ -1273,10 +1530,10 @@ exports.reachedPickup = async (req, res) => {
   }
 };
 
-exports.startRide = async (req, res) => {
+const startRide = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider._id;
 
     const booking = await RideBooking.findById(bookingId);
     if (!booking) {
@@ -1319,11 +1576,11 @@ exports.startRide = async (req, res) => {
 
     try {
       const channelName = `ride-${bookingId}`;
-      await pusher.trigger(channelName, "ride-status-update", {
-        bookingId: bookingId,
-        status: "inProgress",
-        timestamp: new Date().toISOString(),
-      });
+      const payload = await buildRidePusherPayload(bookingId, "inProgress");
+      if (payload) {
+        await pusher.trigger(channelName, "ride-status-update", payload);
+        console.log("✅ Pusher trigger successful - inProgress");
+      }
     } catch (pusherError) {
       console.error("Pusher trigger error:", pusherError);
     }
@@ -1348,10 +1605,10 @@ exports.startRide = async (req, res) => {
   }
 };
 
-exports.completeRide = async (req, res) => {
+const completeRide = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const riderId = req.user._id;
+    const riderId = req.rider._id;
 
     const booking = await RideBooking.findById(bookingId);
     if (!booking) {
@@ -1390,7 +1647,6 @@ exports.completeRide = async (req, res) => {
       changedAt: new Date(),
     });
 
-    // Capture payment if Card
     if (
       booking.paymentType === "Card" &&
       booking.paymentIntentId &&
@@ -1399,7 +1655,9 @@ exports.completeRide = async (req, res) => {
       try {
         await stripe.paymentIntents.capture(booking.paymentIntentId);
         booking.paymentStatus = "captured";
-        console.log(`Payment captured for ride ${bookingId}`);
+        console.log(
+          `Payment captured for ride ${bookingId} - 80% automatically transferred to driver via Stripe Connect`,
+        );
       } catch (paymentError) {
         console.error("Payment capture error:", paymentError.message);
       }
@@ -1407,9 +1665,8 @@ exports.completeRide = async (req, res) => {
 
     await booking.save();
 
-    // Update driver earnings & wallet
     const fare = parseFloat(booking.fare || booking.price || 0);
-    const driverShare = parseFloat((fare * 0.8).toFixed(2)); // 80% to driver
+    const driverShare = parseFloat((fare * 0.8).toFixed(2));
     try {
       await Rider.findOneAndUpdate(
         { user: riderId },
@@ -1419,24 +1676,24 @@ exports.completeRide = async (req, res) => {
           $inc: {
             totalRides: 1,
             totalEarning: driverShare,
-            walletBalance: driverShare,
           },
         },
         { new: true },
       );
-      console.log(`Driver ${riderId} earnings updated: +${driverShare}`);
+      console.log(
+        `Driver ${riderId} earnings updated: +${driverShare} (paid via Stripe Connect)`,
+      );
     } catch (driverUpdateError) {
       console.error("Driver status update error:", driverUpdateError.message);
     }
 
     try {
       const channelName = `ride-${bookingId}`;
-      await pusher.trigger(channelName, "ride-status-update", {
-        bookingId: bookingId,
-        status: "completed",
-        timestamp: new Date().toISOString(),
-      });
-
+      const payload = await buildRidePusherPayload(bookingId, "completed");
+      if (payload) {
+        await pusher.trigger(channelName, "ride-status-update", payload);
+        console.log("✅ Pusher trigger successful - completed");
+      }
       await pusher.trigger("driver-status", "driver-available", {
         driverId: riderId,
         status: "available",
@@ -1467,10 +1724,11 @@ exports.completeRide = async (req, res) => {
   }
 };
 
-exports.getRideStatus = async (req, res) => {
+const getRideStatus = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const userId = req.user._id;
+    const userId = req.user?._id;
+    const riderId = req.rider?._id;
 
     const booking = await RideBooking.findById(bookingId)
       .populate({
@@ -1493,10 +1751,11 @@ exports.getRideStatus = async (req, res) => {
       });
     }
 
-    const isUser = booking.user._id.toString() === userId.toString();
-    const isDriver = booking.driver?._id?.toString() === userId.toString();
+    const isUser = userId && booking.user._id.toString() === userId.toString();
+    const isDriver =
+      riderId && booking.driver?._id?.toString() === riderId.toString();
 
-    if (!isUser && !isDriver && req.user.role !== "admin") {
+    if (!isUser && !isDriver && req.user?.role !== "admin") {
       return res.status(403).json({
         success: false,
         message: "Not authorized to view this ride",
@@ -1545,31 +1804,31 @@ exports.getRideStatus = async (req, res) => {
   }
 };
 
-exports.setupPaymentMethod = async (req, res) => {
+const setupPaymentMethod = async (req, res) => {
   res.status(200).json({ success: true, message: "Setup payment method" });
 };
 
-exports.getUserCards = async (req, res) => {
+const getUserCards = async (req, res) => {
   res.status(200).json({ success: true, cards: [] });
 };
 
-exports.setDefaultCard = async (req, res) => {
+const setDefaultCard = async (req, res) => {
   res.status(200).json({ success: true, message: "Default card set" });
 };
 
-exports.removeCard = async (req, res) => {
+const removeCard = async (req, res) => {
   res.status(200).json({ success: true, message: "Card removed" });
 };
 
-exports.getPaymentStatus = async (req, res) => {
+const getPaymentStatus = async (req, res) => {
   res.status(200).json({ success: true, status: "pending" });
 };
 
-exports.updateDriverLocation = async (req, res) => {
+const updateDriverLocation = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { latitude, longitude } = req.body;
-    const driverId = req.user?._id;
+    const driverId = req.rider?._id;
 
     if (!latitude || !longitude) {
       return res.status(400).json({
@@ -1645,7 +1904,7 @@ exports.updateDriverLocation = async (req, res) => {
   }
 };
 
-exports.getDriverLocation = async (req, res) => {
+const getDriverLocation = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const userId = req.user?._id;
@@ -1662,7 +1921,6 @@ exports.getDriverLocation = async (req, res) => {
       });
     }
 
-    // Check if user is the customer of this ride
     if (booking.user.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
@@ -1670,7 +1928,6 @@ exports.getDriverLocation = async (req, res) => {
       });
     }
 
-    // Check if ride is active
     const activeStatuses = [
       "accepted",
       "onTheWay",
@@ -1687,7 +1944,6 @@ exports.getDriverLocation = async (req, res) => {
 
     const driverLocation = booking.driver?.location?.coordinates || null;
 
-    // Calculate ETA
     let eta = null;
     if (driverLocation && booking.pickupLocation?.coordinates) {
       const distance = calculateDistance(
@@ -1730,10 +1986,11 @@ exports.getDriverLocation = async (req, res) => {
   }
 };
 
-exports.getLocationHistory = async (req, res) => {
+const getLocationHistory = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const userId = req.user?._id;
+    const riderId = req.rider?._id;
 
     const booking = await RideBooking.findById(bookingId);
 
@@ -1744,10 +2001,11 @@ exports.getLocationHistory = async (req, res) => {
       });
     }
 
-    // Allow access to admin or ride participants
     const isAdmin = req.user?.role === "admin";
-    const isDriver = booking.driver?.toString() === userId?.toString();
-    const isCustomer = booking.user?.toString() === userId?.toString();
+    const isDriver =
+      riderId && booking.driver?.toString() === riderId?.toString();
+    const isCustomer =
+      userId && booking.user?.toString() === userId?.toString();
 
     if (!isAdmin && !isDriver && !isCustomer) {
       return res.status(403).json({
@@ -1773,30 +2031,32 @@ exports.getLocationHistory = async (req, res) => {
   }
 };
 
+// ✅ CORRECT EXPORTS - NO CIRCULAR REFERENCES
 module.exports = {
-  createRideBooking: exports.createRideBooking,
-  getNearbyRides: exports.getNearbyRides,
-  getAllRides: exports.getAllRides,
-  debugNearbyRides: exports.debugNearbyRides,
-  testRideStructure: exports.testRideStructure,
-  getAllRidesForDriver: exports.getAllRidesForDriver,
-  cancelRideBooking: exports.cancelRideBooking,
-  driverCancelRideBooking: exports.driverCancelRideBooking,
-  adminCancelRideBooking: exports.adminCancelRideBooking,
-  getCancelledBookings: exports.getCancelledBookings,
-  getUserRideHistory: exports.getUserRideHistory,
-  acceptRide: exports.acceptRide,
-  riderOnTheWay: exports.riderOnTheWay,
-  reachedPickup: exports.reachedPickup,
-  startRide: exports.startRide,
-  completeRide: exports.completeRide,
-  getRideStatus: exports.getRideStatus,
-  setupPaymentMethod: exports.setupPaymentMethod,
-  getUserCards: exports.getUserCards,
-  setDefaultCard: exports.setDefaultCard,
-  removeCard: exports.removeCard,
-  getPaymentStatus: exports.getPaymentStatus,
-  getDriverLocation: exports.getDriverLocation,
-  getLocationHistory: exports.getLocationHistory,
-  updateDriverLocation: exports.updateDriverLocation,
+  createRideBooking,
+  getNearbyRides,
+  getAllRides,
+  debugNearbyRides,
+  testRideStructure,
+  getAllRidesForDriver,
+  cancelRideBooking,
+  driverCancelRideBooking,
+  adminCancelRideBooking,
+  getCancelledBookings,
+  getUserRideHistory,
+  acceptRide,
+  riderOnTheWay,
+  reachedPickup,
+  startRide,
+  completeRide,
+  getRideStatus,
+  setupPaymentMethod,
+  getUserCards,
+  setDefaultCard,
+  removeCard,
+  getPaymentStatus,
+  getDriverLocation,
+  getLocationHistory,
+  updateDriverLocation,
+  estimateFare,
 };

@@ -5,6 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const { default: mongoose } = require("mongoose");
 const cloudinary = require("cloudinary").v2;
+const stripe = require("../config/stripe");
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -730,6 +731,39 @@ exports.submitForVerification = async (req, res) => {
     rider.status = "pending_verification";
     rider.updatedAt = new Date();
     await rider.save();
+
+    // Auto-create Stripe Connect account for driver
+    if (!rider.stripeConnectAccountId) {
+      try {
+        const user = await User.findById(userId);
+        if (user && user.email) {
+          const account = await stripe.accounts.create({
+            type: 'express',
+            country: 'US',
+            email: user.email,
+            capabilities: {
+              card_payments: { requested: true },
+              transfers: { requested: true },
+            },
+            business_type: 'individual',
+            metadata: {
+              riderId: rider._id.toString(),
+              userId: user._id.toString()
+            }
+          });
+
+          rider.stripeConnectAccountId = account.id;
+          rider.connectAccountStatus = 'pending';
+          rider.connectAccountCreatedAt = new Date();
+          await rider.save();
+
+          console.log(`Stripe Connect account created for rider ${rider._id}: ${account.id}`);
+        }
+      } catch (stripeError) {
+        console.error('Stripe Connect account creation error:', stripeError.message);
+        // Don't fail the verification submission if Stripe account creation fails
+      }
+    }
 
     const onboardingData = await getOnboardingData(userId);
 

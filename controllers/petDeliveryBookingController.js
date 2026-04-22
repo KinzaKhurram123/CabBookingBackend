@@ -482,7 +482,7 @@ exports.driverCancelPetDelivery = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { cancellationReason } = req.body;
-    const driverId = req.user._id;
+    const driverId = req.rider._id;
 
     if (!bookingId) {
       return res.status(400).json({
@@ -714,6 +714,39 @@ exports.acceptPetDelivery = async (req, res) => {
 
     if (existingBooking.driver) {
       return res.status(400).json({ success: false, message: "Already accepted by another driver" });
+    }
+
+    if (existingBooking.paymentType === "Card") {
+      if (!rider.stripeConnectAccountId) {
+        return res.status(403).json({
+          success: false,
+          message: "Driver payment account not set up. Please complete Stripe Connect onboarding.",
+          requiresConnectOnboarding: true,
+        });
+      }
+
+      if (!rider.connectChargesEnabled) {
+        return res.status(403).json({
+          success: false,
+          message: "Driver payment account not enabled. Please complete onboarding.",
+          requiresConnectOnboarding: true,
+        });
+      }
+
+      if (existingBooking.paymentIntentId) {
+        const stripe = require('../config/stripe');
+        const applicationFee = Math.round(existingBooking.fare * 0.20 * 100);
+        await stripe.paymentIntents.update(existingBooking.paymentIntentId, {
+          application_fee_amount: applicationFee,
+          transfer_data: {
+            destination: rider.stripeConnectAccountId,
+          },
+          metadata: {
+            driverId: rider._id.toString(),
+            driverConnectAccountId: rider.stripeConnectAccountId,
+          },
+        });
+      }
     }
 
     // Direct update — no condition matching issues
@@ -1050,7 +1083,7 @@ exports.completePetDelivery = async (req, res) => {
       try {
         await stripe.paymentIntents.capture(booking.paymentIntentId);
         finalPaymentStatus = "captured";
-        console.log(`Payment captured for pet delivery ${bookingId}`);
+        console.log(`Payment captured for pet delivery ${bookingId} - 80% automatically transferred to driver via Stripe Connect`);
       } catch (paymentError) {
         console.error("Payment capture error:", paymentError.message);
       }
@@ -1085,12 +1118,11 @@ exports.completePetDelivery = async (req, res) => {
           $inc: {
             totalRides: 1,
             totalEarning: parseFloat((booking.totalFare * 0.8).toFixed(2)),
-            walletBalance: parseFloat((booking.totalFare * 0.8).toFixed(2)),
           },
         },
         { new: true },
       );
-      console.log(`Driver ${riderId} status updated to available`);
+      console.log(`Driver ${riderId} status updated to available (paid via Stripe Connect)`);
     } catch (driverUpdateError) {
       console.error("Driver status update error:", driverUpdateError.message);
     }
@@ -1141,7 +1173,7 @@ exports.updatePetDeliveryDriverLocation = async (req, res) => {
   try {
     const { bookingId } = req.params;
     const { latitude, longitude } = req.body;
-    const driverId = req.user?._id;
+    const driverId = req.rider?._id;
 
     if (!latitude || !longitude) {
       return res.status(400).json({

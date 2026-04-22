@@ -289,7 +289,7 @@ exports.updateProfile = async (req, res) => {
 
       const updatedUser = await user.save();
 
-      res.json({
+      res.status(200).json({
         _id: updatedUser._id,
         name: updatedUser.name,
         email: updatedUser.email,
@@ -302,7 +302,7 @@ exports.updateProfile = async (req, res) => {
     }
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
 
@@ -310,12 +310,12 @@ exports.getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select("-password");
     if (user) {
-      res.json(user);
+      res.status(200).json(user);
     } else {
       res.status(404).json({ message: "User not found" });
     }
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error" });
+    res.status(500).json({ message: "Server error", error: error.message });
   }
 };
