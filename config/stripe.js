@@ -1,4 +1,9 @@
 const Stripe = require("stripe");
-const stripe = Stripe(process.env.STRIPE_SECRET_KEY);
+
+if (!process.env.STRIPE_SECRET_KEY) {
+  console.warn("⚠️  Warning: STRIPE_SECRET_KEY is not set in environment variables");
+}
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "sk_test_placeholder");
 
 module.exports = stripe;

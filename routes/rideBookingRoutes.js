@@ -33,6 +33,7 @@ const {
   setDefaultCard,
   removeCard,
   getPaymentStatus,
+  confirmPaymentMethod,
 } = require("../controllers/paymentController");
 
 router.post("/estimate-fare", protect, estimateFare);
@@ -62,6 +63,7 @@ router.put("/:bookingId/complete", protect, riderProtect, completeRide);
 router.get("/:bookingId/status", protect, getRideStatus);
 
 router.post("/payment/setup", protect, setupPaymentMethod);
+router.post("/payment/confirm", protect, confirmPaymentMethod);
 router.get("/payment/cards", protect, getUserCards);
 router.put("/payment/default-card", protect, setDefaultCard);
 router.delete("/payment/card/:paymentMethodId", protect, removeCard);

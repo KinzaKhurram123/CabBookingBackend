@@ -1,5 +1,10 @@
 const express = require("express");
 const dotenv = require("dotenv");
+const path = require("path");
+
+// Load environment variables FIRST before anything else
+dotenv.config({ path: path.resolve(__dirname, ".env") });
+
 const cors = require("cors");
 const connectDB = require("./config/db");
 const errorHandler = require("./middleware/errorMiddlerware");
@@ -12,7 +17,6 @@ const cloudinary = require("cloudinary").v2;
 const http = require("http");
 const { initSocket } = require("./config/socket");
 
-dotenv.config();
 connectDB();
 const app = express();
 
@@ -20,7 +24,21 @@ const server = http.createServer(app);
 const io = initSocket(server);
 
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin: [
+    "http://127.0.0.1:5501",
+    "http://localhost:5501",
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://www.ridelynk.com",
+    "https://ridelynk.com",
+    "https://krystal-imaginable-hurtlingly.ngrok-free.dev"
+  ],
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  optionsSuccessStatus: 200
+}));
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/auth", require("./routes/authRoutes"));

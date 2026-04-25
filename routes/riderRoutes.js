@@ -14,6 +14,14 @@ const {
   getRiderBookingHistory,
   upload,
 } = require("../controllers/riderController");
+const {
+  setupPaymentMethod,
+  getUserCards,
+  setDefaultCard,
+  removeCard,
+  getPaymentStatus,
+  confirmPaymentMethod,
+} = require("../controllers/paymentController");
 const { protect } = require("../middleware/authMiddleware");
 const { riderProtect } = require("../middleware/riderAuthMiddleware");
 
@@ -59,5 +67,15 @@ router.put("/profile", updateRiderProfile);
 router.put("/status", riderProtect, updateRiderStatus);
 
 router.get("/booking-history", riderProtect, getRiderBookingHistory);
+
+// Payment routes
+router.post("/payment/setup", setupPaymentMethod);
+router.post("/payment/confirm", confirmPaymentMethod);
+router.get("/payment/cards", getUserCards);
+router.put("/payment/cards/default", setDefaultCard);
+router.put("/payment/default-card", setDefaultCard);
+router.delete("/payment/cards/remove/:paymentMethodId", removeCard);
+router.delete("/payment/card/:paymentMethodId", removeCard);
+router.get("/payment/status/:bookingId", getPaymentStatus);
 
 module.exports = router;
