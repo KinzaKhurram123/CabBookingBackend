@@ -7,26 +7,54 @@ const rideTypeSchema = new mongoose.Schema(
       required: true,
       enum: ["standard", "economy", "premium", "special"],
     },
-    categoryDisplayName: String,
-    categoryDescription: String,
-    rideId: String,
-    name: String,
-    features: String,
-    priceModel: {
+    categoryDisplayName: {
       type: String,
-      default: "varies",
+      required: true,
     },
-    capacity: Number,
+    categoryDescription: String,
+    categoryIcon: String,
+    categoryColor: String,
+    rideId: {
+      type: String,
+      required: true,
+      unique: true,
+    },
+    name: {
+      type: String,
+      required: true,
+    },
+    description: String,
+    features: [String],
+    price: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+    capacity: {
+      type: Number,
+      required: true,
+      default: 4,
+    },
+    luggageCapacity: {
+      type: Number,
+      default: 2,
+    },
     timeEstimate: {
       type: String,
       default: "Real time in Minutes, wait time",
     },
-    icon: String,
+    icon: {
+      type: String,
+      default: "car",
+    },
     isActive: {
       type: Boolean,
       default: true,
     },
-    order: Number,
+    order: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,

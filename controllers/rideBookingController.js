@@ -2,14 +2,13 @@ const mongoose = require("mongoose");
 const RideBooking = require("../models/rideBooking");
 const User = require("../models/user");
 const Rider = require("../models/riderModel");
-const parcelBooking = require("../models/parcelBooking");
-const petDeliveryBooking = require("../models/petDeliveryBooking");
+const ParcelBooking = require("../models/parcelBooking");
+const PetDeliveryBooking = require("../models/petDeliveryBooking");
 const { chargeCard } = require("./paymentController");
 const stripe = require("../config/stripe");
 const pusher = require("../config/pusher");
 const { calculateRideFare } = require("../utils/fareCalculator");
 
-// ─── HELPER: Build full populated ride Pusher payload ──────────────────────
 const buildRidePusherPayload = async (bookingId, status) => {
   const booking = await RideBooking.findById(bookingId)
     .populate("user", "name email phoneNumber profileImage")
@@ -171,7 +170,6 @@ function getStatusProgress(status) {
   return statusOrder[status] || 0;
 }
 
-// Fare Estimation Endpoint
 const estimateFare = async (req, res) => {
   try {
     const { distance, time, bookingTime } = req.body;
@@ -253,6 +251,44 @@ const createRideBooking = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "User not found",
+      });
+    }
+
+    // Check for existing active bookings (ride, parcel, or pet delivery)
+    const activeStatuses = [
+      "pending",
+      "accepted",
+      "onTheWay",
+      "arrived",
+      "inProgress",
+    ];
+
+    const existingRideBooking = await RideBooking.findOne({
+      user: req.user._id,
+      status: { $in: activeStatuses },
+    });
+
+    const existingParcelBooking = await ParcelBooking.findOne({
+      user: req.user._id,
+      status: { $in: activeStatuses },
+    });
+
+    const existingPetBooking = await PetDeliveryBooking.findOne({
+      user: req.user._id,
+      status: { $in: activeStatuses },
+    });
+
+    if (existingRideBooking || existingParcelBooking || existingPetBooking) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "You already have an active booking. Please complete or cancel it before creating a new one.",
+        hasActiveBooking: true,
+        activeBookingType: existingRideBooking
+          ? "ride"
+          : existingParcelBooking
+            ? "parcel"
+            : "pet_delivery",
       });
     }
 
@@ -655,9 +691,9 @@ const getAllRides = async (req, res) => {
       total: totalRides,
       page: parseInt(page),
       totalPages: Math.ceil(totalRides / parseInt(limit)),
-      rides: rides,        // For your existing frontend
-      bookings: rides,     // For parcel booking component
-      data: rides,         // Generic fallback
+      rides: rides, // For your existing frontend
+      bookings: rides, // For parcel booking component
+      data: rides, // Generic fallback
     });
   } catch (error) {
     console.error("Get all rides error:", error);
@@ -1281,7 +1317,10 @@ const getUserRideHistory = async (req, res) => {
       .skip(skip)
       .lean();
 
-    const total = await RideBooking.countDocuments({ user: userId, ...statusFilter });
+    const total = await RideBooking.countDocuments({
+      user: userId,
+      ...statusFilter,
+    });
 
     const formattedRides = cabRides.map((ride) => ({
       id: ride._id,
@@ -1295,22 +1334,25 @@ const getUserRideHistory = async (req, res) => {
         phone: ride.user?.phoneNumber,
         profileImage: ride.user?.profileImage,
       },
-      driver: ride.driver ? {
-        id: ride.driver._id,
-        name: ride.driver.user?.name || null,
-        email: ride.driver.user?.email || null,
-        phone: ride.driver.user?.phoneNumber || ride.driver.phoneNumber || null,
-        profileImage: ride.driver.user?.profileImage || null,
-        rating: ride.driver.rating || 5,
-        totalRides: ride.driver.totalRides || 0,
-        vehicle: {
-          category: ride.driver.vehicleDetails?.category || null,
-          type: ride.driver.vehicleDetails?.vehicleType || null,
-          make: ride.driver.vehicleDetails?.make || null,
-          model: ride.driver.vehicleDetails?.model || null,
-          licensePlate: ride.driver.vehicleDetails?.licensePlate || null,
-        },
-      } : null,
+      driver: ride.driver
+        ? {
+            id: ride.driver._id,
+            name: ride.driver.user?.name || null,
+            email: ride.driver.user?.email || null,
+            phone:
+              ride.driver.user?.phoneNumber || ride.driver.phoneNumber || null,
+            profileImage: ride.driver.user?.profileImage || null,
+            rating: ride.driver.rating || 5,
+            totalRides: ride.driver.totalRides || 0,
+            vehicle: {
+              category: ride.driver.vehicleDetails?.category || null,
+              type: ride.driver.vehicleDetails?.vehicleType || null,
+              make: ride.driver.vehicleDetails?.make || null,
+              model: ride.driver.vehicleDetails?.model || null,
+              licensePlate: ride.driver.vehicleDetails?.licensePlate || null,
+            },
+          }
+        : null,
       pickup: {
         name: ride.pickupLocationName,
         coordinates: ride.pickupLocation?.coordinates
@@ -1328,8 +1370,12 @@ const getUserRideHistory = async (req, res) => {
       },
       status: ride.status,
       fare: ride.fare || ride.price || null,
-      distance: ride.distance ? `${parseFloat(ride.distance).toFixed(2)} km` : null,
-      duration: ride.duration ? `${Math.round(parseFloat(ride.duration))} mins` : null,
+      distance: ride.distance
+        ? `${parseFloat(ride.distance).toFixed(2)} km`
+        : null,
+      duration: ride.duration
+        ? `${Math.round(parseFloat(ride.duration))} mins`
+        : null,
       payment: {
         method: ride.paymentMethod,
         type: ride.paymentType,

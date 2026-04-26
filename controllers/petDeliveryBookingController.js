@@ -1,5 +1,7 @@
 const mongoose = require("mongoose");
 const PetDeliveryBooking = require("../models/petDeliveryBooking");
+const RideBooking = require("../models/rideBooking");
+const ParcelBooking = require("../models/parcelBooking");
 const User = require("../models/user");
 const Rider = require("../models/riderModel");
 const stripe = require("../config/stripe");
@@ -114,6 +116,33 @@ exports.createPetDeliveryBooking = async (req, res) => {
       return res.status(404).json({
         success: false,
         message: "User not found",
+      });
+    }
+
+    // Check for existing active bookings (ride, parcel, or pet delivery)
+    const activeStatuses = ["pending", "accepted", "onTheWay", "arrived", "inProgress"];
+    
+    const existingRideBooking = await RideBooking.findOne({
+      user: req.user._id,
+      status: { $in: activeStatuses },
+    });
+    
+    const existingParcelBooking = await ParcelBooking.findOne({
+      user: req.user._id,
+      status: { $in: activeStatuses },
+    });
+    
+    const existingPetBooking = await PetDeliveryBooking.findOne({
+      user: req.user._id,
+      status: { $in: activeStatuses },
+    });
+
+    if (existingRideBooking || existingParcelBooking || existingPetBooking) {
+      return res.status(400).json({
+        success: false,
+        message: "You already have an active booking. Please complete or cancel it before creating a new one.",
+        hasActiveBooking: true,
+        activeBookingType: existingRideBooking ? "ride" : existingParcelBooking ? "parcel" : "pet_delivery",
       });
     }
 

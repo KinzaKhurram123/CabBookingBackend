@@ -265,3 +265,101 @@ exports.chargeCard = async (booking) => {
     throw error;
   }
 };
+
+exports.createPaymentIntent = async (req, res) => {
+  try {
+    const { amount, currency = "usd", bookingData } = req.body;
+
+    if (!amount) {
+      return res.status(400).json({ success: false, message: "Amount is required" });
+    }
+
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // Create Stripe customer if not exists
+    if (!user.stripeCustomerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        name: user.name,
+        metadata: { userId: user._id.toString() },
+      });
+      user.stripeCustomerId = customer.id;
+      await user.save();
+    }
+
+    const paymentIntentData = {
+      amount: Math.round(amount),
+      currency,
+      customer: user.stripeCustomerId,
+      payment_method_types: ["card"],
+      metadata: { userId: user._id.toString() },
+      confirm: false, // Let frontend confirm
+    };
+
+    if (user.defaultPaymentMethod) {
+      paymentIntentData.payment_method = user.defaultPaymentMethod;
+    }
+
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentData);
+
+    res.status(200).json({
+      success: true,
+      message: "Payment intent created",
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+    });
+  } catch (error) {
+    console.error("Create payment intent error:", error);
+    res.status(500).json({ success: false, message: "Failed to create payment intent", error: error.message });
+  }
+};
+
+exports.confirmPaymentIntent = async (req, res) => {
+  try {
+    const { paymentIntentId, paymentMethodId } = req.body;
+
+    if (!paymentIntentId) {
+      return res.status(400).json({ success: false, message: "paymentIntentId is required" });
+    }
+
+    // First retrieve the current status
+    const existing = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    // Already succeeded — just return success
+    if (existing.status === "succeeded") {
+      return res.status(200).json({
+        success: true,
+        message: "Payment already confirmed",
+        status: existing.status,
+        paymentIntentId: existing.id,
+      });
+    }
+
+    // Already cancelled
+    if (existing.status === "canceled") {
+      return res.status(400).json({
+        success: false,
+        message: "Payment was cancelled",
+        status: existing.status,
+      });
+    }
+
+    // Confirm if still requires confirmation
+    const paymentIntent = await stripe.paymentIntents.confirm(paymentIntentId, {
+      ...(paymentMethodId && { payment_method: paymentMethodId }),
+    });
+
+    res.status(200).json({
+      success: true,
+      message: "Payment confirmed",
+      status: paymentIntent.status,
+      paymentIntentId: paymentIntent.id,
+    });
+  } catch (error) {
+    console.error("Confirm payment intent error:", error);
+    res.status(500).json({ success: false, message: "Failed to confirm payment", error: error.message });
+  }
+};

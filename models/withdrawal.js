@@ -5,7 +5,12 @@ const withdrawalSchema = new mongoose.Schema(
     rider: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Rider",
-      required: true,
+      default: null,
+    },
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
     },
     amount: {
       type: Number,
@@ -24,6 +29,10 @@ const withdrawalSchema = new mongoose.Schema(
       bankName: String,
       branchCode: String,
       iban: String,
+    },
+    paymentMethodId: {
+      type: String,
+      default: null,
     },
     rejectionReason: {
       type: String,
@@ -61,6 +70,7 @@ const withdrawalSchema = new mongoose.Schema(
 );
 
 withdrawalSchema.index({ rider: 1, status: 1, createdAt: -1 });
+withdrawalSchema.index({ userId: 1, status: 1, createdAt: -1 });
 withdrawalSchema.index({ status: 1, createdAt: -1 });
 withdrawalSchema.index({ createdAt: -1 });
 

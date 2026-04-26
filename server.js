@@ -24,21 +24,23 @@ const server = http.createServer(app);
 const io = initSocket(server);
 
 app.use(express.json());
-app.use(cors({
-  origin: [
-    "http://127.0.0.1:5501",
-    "http://localhost:5501",
-    "http://localhost:3000",
-    "http://localhost:3001",
-    "https://www.ridelynk.com",
-    "https://ridelynk.com",
-    "https://krystal-imaginable-hurtlingly.ngrok-free.dev"
-  ],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-  optionsSuccessStatus: 200
-}));
+app.use(
+  cors({
+    origin: [
+      "http://127.0.0.1:5501",
+      "http://localhost:5501",
+      "http://localhost:3000",
+      "http://localhost:3001",
+      "https://www.ridelynk.com",
+      "https://ridelynk.com",
+      "https://krystal-imaginable-hurtlingly.ngrok-free.dev",
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    optionsSuccessStatus: 200,
+  }),
+);
 app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/auth", require("./routes/authRoutes"));
@@ -58,6 +60,8 @@ app.use("/api/withdrawal", require("./routes/withdrawalRoutes"));
 app.use("/api/referral", require("./routes/referralRoutes"));
 app.use("/api/support", require("./routes/supportRoutes"));
 app.use("/api/stripe-connect", require("./routes/stripeConnectRoutes"));
+app.use("/api/payment", require("./routes/paymentRoutes"));
+app.use("/api/promo", require("./routes/promoRoutes"));
 
 app.get("/test", (req, res) => {
   res.json({ message: "Backend is alive!" });

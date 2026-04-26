@@ -747,3 +747,280 @@ exports.adminBulkApproveWithdrawals = async (req, res) => {
     });
   }
 };
+
+// ==================== USER (CUSTOMER) WITHDRAWAL CONTROLLERS ====================
+
+exports.getUserWallet = async (req, res) => {
+  try {
+    const user = await require("../models/user")
+      .findById(req.user._id)
+      .select("walletBalance totalEarnedFromReferrals");
+
+    if (!user) {
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    // Pending withdrawals amount for this user
+    const pendingWithdrawals = await Withdrawal.aggregate([
+      { $match: { userId: user._id, status: "pending" } },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+    const pendingAmount = pendingWithdrawals[0]?.total || 0;
+
+    res.status(200).json({
+      success: true,
+      wallet: {
+        balance: user.walletBalance,
+        totalEarned: user.totalEarnedFromReferrals,
+        pendingWithdrawal: pendingAmount,
+      },
+      withdrawalLimits: {
+        minimum: MINIMUM_WITHDRAWAL,
+        maximumPerRequest: MAX_WITHDRAWAL_PER_REQUEST,
+        maximumPerDay: MAX_WITHDRAWAL_PER_DAY,
+      },
+    });
+  } catch (error) {
+    console.error("Get user wallet error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.requestUserWithdrawal = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  try {
+    const { amount, paymentMethodId, bankAccount } = req.body;
+    const User = require("../models/user");
+
+    console.log("Request body:", req.body);
+    console.log("Amount:", amount, "BankAccount:", bankAccount);
+
+    if (!amount || amount <= 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Valid withdrawal amount is required",
+      });
+    }
+
+    const user = await User.findById(req.user._id).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return res
+        .status(404)
+        .json({ success: false, message: "User not found" });
+    }
+
+    console.log("User wallet balance:", user.walletBalance, "Requested amount:", amount);
+
+    // Check minimum amount
+    if (amount < MINIMUM_WITHDRAWAL) {
+      console.log("FAILED: Amount below minimum");
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Minimum withdrawal amount is ${MINIMUM_WITHDRAWAL}`,
+        minimumAmount: MINIMUM_WITHDRAWAL,
+      });
+    }
+
+    // Check maximum per request
+    if (amount > MAX_WITHDRAWAL_PER_REQUEST) {
+      console.log("FAILED: Amount above maximum");
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Maximum withdrawal per request is ${MAX_WITHDRAWAL_PER_REQUEST}`,
+        maximumAmount: MAX_WITHDRAWAL_PER_REQUEST,
+      });
+    }
+
+    // Check wallet balance
+    if (user.walletBalance < amount) {
+      console.log("FAILED: Insufficient balance");
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Insufficient wallet balance. Available: ${user.walletBalance}`,
+        availableBalance: user.walletBalance,
+      });
+    }
+
+    // Check daily limit
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const todayWithdrawals = await Withdrawal.aggregate([
+      {
+        $match: {
+          userId: user._id,
+          createdAt: { $gte: startOfDay },
+          status: { $in: ["pending", "approved"] },
+        },
+      },
+      { $group: { _id: null, total: { $sum: "$amount" } } },
+    ]);
+
+    const dailyTotal = todayWithdrawals[0]?.total || 0;
+    const remaining = MAX_WITHDRAWAL_PER_DAY - dailyTotal;
+
+    console.log("Daily total:", dailyTotal, "Remaining:", remaining);
+
+    if (dailyTotal + amount > MAX_WITHDRAWAL_PER_DAY) {
+      console.log("FAILED: Daily limit exceeded");
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: `Daily withdrawal limit exceeded. Remaining today: ${remaining}`,
+        dailyLimit: MAX_WITHDRAWAL_PER_DAY,
+        remainingToday: remaining,
+        requestedAmount: amount,
+      });
+    }
+
+    // Validate payment method - bankAccount can be string (payment method ID) or object (bank details)
+    if (!bankAccount && !paymentMethodId) {
+      console.log("FAILED: No payment method provided");
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Payment method (card ID or bank account) is required",
+        requiresPaymentMethod: true,
+      });
+    }
+
+    console.log("All validations passed, checking for pending withdrawal");
+
+    // Check for existing pending withdrawal
+    const existingPending = await Withdrawal.findOne({
+      userId: user._id,
+      status: "pending",
+    }).session(session);
+
+    console.log("Existing pending withdrawal:", existingPending);
+
+    if (existingPending) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message:
+          "You already have a pending withdrawal request. Please wait for it to be processed.",
+        pendingWithdrawalId: existingPending._id,
+      });
+    }
+
+    // Create withdrawal request for user
+    const withdrawalData = {
+      userId: user._id,
+      amount,
+      status: "pending",
+      requestedAt: new Date(),
+    };
+
+    // Handle both paymentMethodId and bankAccount
+    if (paymentMethodId) {
+      withdrawalData.paymentMethodId = paymentMethodId;
+    } else if (bankAccount) {
+      withdrawalData.bankAccount = bankAccount;
+    }
+
+    const withdrawal = await Withdrawal.create([withdrawalData], { session });
+
+    // Deduct from wallet
+    await User.findByIdAndUpdate(
+      user._id,
+      { $inc: { walletBalance: -amount } },
+      { session },
+    );
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(201).json({
+      success: true,
+      message: "Withdrawal request submitted successfully",
+      withdrawal: {
+        id: withdrawal[0]._id,
+        amount: withdrawal[0].amount,
+        status: withdrawal[0].status,
+        paymentMethod: paymentMethodId ? "stripe" : "bank_transfer",
+        createdAt: withdrawal[0].createdAt,
+      },
+    });
+  } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
+    console.error("Request user withdrawal error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+exports.getUserWithdrawalHistory = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status } = req.query;
+    const filter = { userId: req.user._id };
+    if (status) filter.status = status;
+
+    const withdrawals = await Withdrawal.find(filter)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(parseInt(limit))
+      .lean();
+
+    const total = await Withdrawal.countDocuments(filter);
+
+    // Calculate summary statistics
+    const summary = await Withdrawal.aggregate([
+      { $match: { userId: req.user._id } },
+      {
+        $group: {
+          _id: "$status",
+          total: { $sum: "$amount" },
+          count: { $sum: 1 },
+        },
+      },
+    ]);
+
+    res.status(200).json({
+      success: true,
+      count: withdrawals.length,
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / limit),
+      withdrawals,
+      summary: {
+        pending: summary.find((s) => s._id === "pending")?.total || 0,
+        approved: summary.find((s) => s._id === "approved")?.total || 0,
+        paid: summary.find((s) => s._id === "paid")?.total || 0,
+        rejected: summary.find((s) => s._id === "rejected")?.total || 0,
+      },
+    });
+  } catch (error) {
+    console.error("Get user withdrawal history error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};

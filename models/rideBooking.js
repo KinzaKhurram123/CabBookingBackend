@@ -125,6 +125,10 @@ const rideBookingSchema = new mongoose.Schema(
     waitingTime: Number,
     waitingCharges: Number,
     totalFare: Number,
+    // Promo code fields
+    promoCode: { type: String, default: null },
+    discountAmount: { type: Number, default: 0 },
+    originalFare: { type: Number, default: null },
     statusHistory: [
       {
         status: String,

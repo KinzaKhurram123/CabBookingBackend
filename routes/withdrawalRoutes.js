@@ -11,9 +11,17 @@ const {
   adminApproveWithdrawal,
   adminRejectWithdrawal,
   adminMarkAsPaid,
+  getUserWallet,
+  requestUserWithdrawal,
+  getUserWithdrawalHistory,
 } = require("../controllers/withdrawalController");
 
-// ─── Driver routes ────────────────────────────────────────────────────────────
+// ─── User (Customer) routes ───────────────────────────────────────────────────
+router.get("/user/wallet", protect, getUserWallet);
+router.post("/user/request", protect, requestUserWithdrawal);
+router.get("/user/history", protect, getUserWithdrawalHistory);
+
+// ─── Driver/Rider routes ──────────────────────────────────────────────────────
 router.get("/wallet", protect, riderProtect, getWallet);
 router.post("/request", protect, riderProtect, requestWithdrawal);
 router.get("/history", protect, riderProtect, getWithdrawalHistory);
