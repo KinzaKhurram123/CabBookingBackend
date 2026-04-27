@@ -62,6 +62,7 @@ app.use("/api/support", require("./routes/supportRoutes"));
 app.use("/api/stripe-connect", require("./routes/stripeConnectRoutes"));
 app.use("/api/payment", require("./routes/paymentRoutes"));
 app.use("/api/promo", require("./routes/promoRoutes"));
+app.use("/api/notifications", require("./routes/notificationRoutes")); // Notification routes
 
 app.get("/test", (req, res) => {
   res.json({ message: "Backend is alive!" });
