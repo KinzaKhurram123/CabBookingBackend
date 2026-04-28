@@ -278,28 +278,40 @@ exports.updateProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
 
-    if (user) {
-      user.name = req.body.name || user.name;
-      user.phoneNumber = req.body.phoneNumber || user.phoneNumber;
-      user.email = req.body.email || user.email;
+    if (!user) {
+      return res.status(404).json({ message: "User not found" });
+    }
 
-      if (req.body.password) {
-        user.password = req.body.password;
-      }
+    // Update basic fields
+    user.name = req.body.name || user.name;
+    user.phoneNumber = req.body.phoneNumber || user.phoneNumber;
+    user.email = req.body.email || user.email;
 
-      const updatedUser = await user.save();
+    // Update password if provided
+    if (req.body.password) {
+      user.password = req.body.password;
+    }
 
-      res.status(200).json({
+    // Update profile image if provided
+    if (req.body.profileImage) {
+      user.profileImage = req.body.profileImage;
+    }
+
+    const updatedUser = await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Profile updated successfully",
+      data: {
         _id: updatedUser._id,
         name: updatedUser.name,
         email: updatedUser.email,
         phoneNumber: updatedUser.phoneNumber,
+        profileImage: updatedUser.profileImage,
         role: updatedUser.role,
         token: generateToken(updatedUser._id),
-      });
-    } else {
-      res.status(404).json({ message: "User not found" });
-    }
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error", error: error.message });
