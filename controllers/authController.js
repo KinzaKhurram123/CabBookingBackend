@@ -276,6 +276,8 @@ exports.resetPassword = async (req, res) => {
 
 exports.updateProfile = async (req, res) => {
   try {
+    console.log('Update Profile Request Body:', req.body);
+    
     const user = await User.findById(req.user._id);
 
     if (!user) {
@@ -283,9 +285,9 @@ exports.updateProfile = async (req, res) => {
     }
 
     // Update basic fields
-    user.name = req.body.name || user.name;
-    user.phoneNumber = req.body.phoneNumber || user.phoneNumber;
-    user.email = req.body.email || user.email;
+    if (req.body.name) user.name = req.body.name;
+    if (req.body.phoneNumber) user.phoneNumber = req.body.phoneNumber;
+    if (req.body.email) user.email = req.body.email;
 
     // Update password if provided
     if (req.body.password) {
@@ -294,10 +296,12 @@ exports.updateProfile = async (req, res) => {
 
     // Update profile image if provided
     if (req.body.profileImage) {
+      console.log('Updating profileImage to:', req.body.profileImage);
       user.profileImage = req.body.profileImage;
     }
 
     const updatedUser = await user.save();
+    console.log('Updated user profileImage:', updatedUser.profileImage);
 
     res.status(200).json({
       success: true,
@@ -313,7 +317,7 @@ exports.updateProfile = async (req, res) => {
       }
     });
   } catch (error) {
-    console.error(error);
+    console.error('Update profile error:', error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
