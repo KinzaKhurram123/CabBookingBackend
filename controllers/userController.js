@@ -4,12 +4,39 @@ const RideBooking = require("../models/rideBooking");
 const ParcelBooking = require("../models/parcelBooking");
 const PetDeliveryBooking = require("../models/petDeliveryBooking");
 
-exports.getUserProfile = (req, res) => {
-  res.json({
-    _id: req.user.id,
-    name: req.user.name,
-    email: req.user.email,
-  });
+exports.getUserProfile = async (req, res) => {
+  try {
+    const User = require('../models/user');
+    const user = await User.findById(req.user._id).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false,
+        message: "User not found" 
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        profileImage: user.profileImage,
+        role: user.role,
+        walletBalance: user.walletBalance,
+        referralCode: user.referralCode,
+      }
+    });
+  } catch (error) {
+    console.error('Get user profile error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
+  }
 };
 
 cloudinary.config({

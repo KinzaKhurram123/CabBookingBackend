@@ -322,12 +322,33 @@ exports.getProfile = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select("-password");
     if (user) {
-      res.status(200).json(user);
+      res.status(200).json({
+        success: true,
+        data: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          phoneNumber: user.phoneNumber,
+          profileImage: user.profileImage,
+          role: user.role,
+          walletBalance: user.walletBalance,
+          referralCode: user.referralCode,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
+        }
+      });
     } else {
-      res.status(404).json({ message: "User not found" });
+      res.status(404).json({ 
+        success: false,
+        message: "User not found" 
+      });
     }
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
   }
 };
