@@ -656,10 +656,14 @@ exports.deleteDriver = async (req, res) => {
 
 exports.getPendingDrivers = async (req, res) => {
   try {
-    const pendingDrivers = await Driver.find({
+    console.log('Getting pending drivers...');
+    
+    const pendingDrivers = await Rider.find({
       verificationStatus: "pending",
       isVerified: false,
     }).populate("user", "name email phoneNumber profileImage");
+
+    console.log(`Found ${pendingDrivers.length} pending drivers`);
 
     res.status(200).json({
       success: true,
@@ -667,9 +671,11 @@ exports.getPendingDrivers = async (req, res) => {
       data: pendingDrivers,
     });
   } catch (error) {
+    console.error('Get pending drivers error:', error);
     res.status(500).json({
       success: false,
       message: "Server error",
+      error: error.message
     });
   }
 };
@@ -1220,20 +1226,27 @@ exports.deleteRide = async (req, res) => {
 
 exports.getDriverVerifications = async (req, res) => {
   try {
+    console.log('Getting driver verifications...');
+    
     const verifications = await Rider.find({
       verificationStatus: { $in: ["pending", "in_review"] },
     })
       .populate("user", "name email phoneNumber profileImage")
       .lean();
 
+    console.log(`Found ${verifications.length} verifications`);
+
     res.status(200).json({
       success: true,
+      count: verifications.length,
       data: verifications,
     });
   } catch (error) {
+    console.error('Get driver verifications error:', error);
     res.status(500).json({
       success: false,
       message: "Server error",
+      error: error.message
     });
   }
 };
