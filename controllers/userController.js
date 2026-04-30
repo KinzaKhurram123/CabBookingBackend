@@ -71,6 +71,7 @@ exports.uploadProfileImage = async (req, res) => {
       uploadStream.end(req.file.buffer);
     });
 
+    const User = require('../models/user');
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
       { profileImage: result.secure_url },
@@ -92,6 +93,53 @@ exports.uploadProfileImage = async (req, res) => {
   }
 };
 
+// Update FCM token
+exports.updateFCMToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+
+    if (!fcmToken) {
+      return res.status(400).json({
+        success: false,
+        message: "FCM token is required",
+      });
+    }
+
+    const User = require("../models/user");
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { fcmToken: fcmToken },
+      { new: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      message: "FCM token updated successfully",
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        fcmToken: user.fcmToken,
+      },
+    });
+  } catch (error) {
+    console.error("Update FCM token error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
+// Get current active booking
 exports.getCurrentActiveBooking = async (req, res) => {
   try {
     const userId = req.user._id;

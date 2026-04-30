@@ -57,7 +57,7 @@ The plan follows an incremental approach: database models → core services → 
     - Add `scheduledAt`, `matchingStartedAt` timestamp fields
     - _Requirements: 15.1, 15.5, 15.6, 16.1, 16.5, 16.8_
 
-- [~] 2. Implement bank account validation service
+- [ ] 2. Implement bank account validation service
   - [ ] 2.1 Create bank account validator utility
     - Create `utils/bankAccountValidator.js`
     - Implement `validateBankAccount(bankAccountData)` function
@@ -76,7 +76,7 @@ The plan follows an incremental approach: database models → core services → 
     - Use environment variable for encryption key
     - _Requirements: 3.4, 3.9, 9.10, 9.11_
 
-- [~] 3. Create Stripe Connect payout processor service
+- [ ] 3. Create Stripe Connect payout processor service
   - [ ] 3.1 Create Stripe payout service
     - Create `services/stripePayoutService.js`
     - Implement `createStripeTransfer(riderId, amount, payoutRecordId)` function
@@ -149,7 +149,7 @@ The plan follows an incremental approach: database models → core services → 
     - Test balance deduction atomicity
     - _Requirements: 2.1-2.10_
 
-- [~] 5. Checkpoint - Ensure instant payout flow works end-to-end
+- [ ] 5. Checkpoint - Ensure instant payout flow works end-to-end
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 6. Implement driver document verification system
@@ -219,7 +219,7 @@ The plan follows an incremental approach: database models → core services → 
     - Test authorization (driver can only access own documents)
     - _Requirements: 13.1-13.10_
 
-- [~] 8. Implement admin document verification workflow
+- [ ] 8. Implement admin document verification workflow
   - [ ] 8.1 Create admin get pending documents endpoint
     - Add `adminGetPendingDocuments` method to `controllers/adminController.js`
     - Support filtering by documentType, driverId
@@ -261,7 +261,7 @@ The plan follows an incremental approach: database models → core services → 
     - Test verification status updates
     - _Requirements: 14.1-14.11_
 
-- [~] 9. Checkpoint - Ensure document verification system works end-to-end
+- [ ] 9. Checkpoint - Ensure document verification system works end-to-end
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 10. Implement scheduled ride booking system
@@ -367,7 +367,7 @@ The plan follows an incremental approach: database models → core services → 
     - Test fare recalculation
     - _Requirements: 16.1-16.12_
 
-- [~] 12. Checkpoint - Ensure scheduled rides and waypoints work correctly
+- [ ] 12. Checkpoint - Ensure scheduled rides and waypoints work correctly
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 13. Implement weekly payout scheduler
