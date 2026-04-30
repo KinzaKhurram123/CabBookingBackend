@@ -1298,14 +1298,24 @@ exports.getVerificationById = async (req, res) => {
 
 exports.approveVerification = async (req, res) => {
   try {
+    console.log('Approving verification for rider ID:', req.params.id);
+    
     const rider = await Rider.findById(req.params.id);
     if (!rider) {
+      console.log('Rider not found:', req.params.id);
       return res.status(404).json({
         success: false,
         message: "Rider not found",
       });
     }
 
+    console.log('Rider found, current status:', {
+      isVerified: rider.isVerified,
+      verificationStatus: rider.verificationStatus,
+      status: rider.status
+    });
+
+    // Approve all documents
     if (rider.documents?.license) rider.documents.license.status = "approved";
     if (rider.documents?.insurance)
       rider.documents.insurance.status = "approved";
@@ -1314,57 +1324,77 @@ exports.approveVerification = async (req, res) => {
     if (rider.documents?.vehicleRegistration)
       rider.documents.vehicleRegistration.status = "approved";
 
+    // Update rider verification status
     rider.isVerified = true;
     rider.verificationStatus = "approved";
     rider.status = "available";
     rider.verifiedAt = new Date();
-    await rider.save();
+    
+    const savedRider = await rider.save();
+    console.log('Rider approved successfully, new status:', {
+      isVerified: savedRider.isVerified,
+      verificationStatus: savedRider.verificationStatus,
+      status: savedRider.status
+    });
 
     res.status(200).json({
       success: true,
       message: "Rider verification approved successfully",
-      data: rider,
+      data: savedRider,
     });
   } catch (error) {
+    console.error('Approve verification error:', error);
     res.status(500).json({
       success: false,
       message: "Server error",
+      error: error.message,
     });
   }
 };
 
 exports.rejectVerification = async (req, res) => {
   try {
+    console.log('Rejecting verification for rider ID:', req.params.id);
+    
     const { rejectionReason, rejectedDocument } = req.body;
     const rider = await Rider.findById(req.params.id);
 
     if (!rider) {
+      console.log('Rider not found:', req.params.id);
       return res.status(404).json({
         success: false,
         message: "Rider not found",
       });
     }
 
+    console.log('Rider found, rejecting with reason:', rejectionReason);
+
+    // Reject specific document if provided
     if (rejectedDocument && rider.documents[rejectedDocument]) {
       rider.documents[rejectedDocument].status = "rejected";
       rider.documents[rejectedDocument].rejectionReason = rejectionReason;
     }
 
+    // Update rider verification status
     rider.isVerified = false;
     rider.verificationStatus = "rejected";
     rider.status = "inactive";
     rider.rejectionReason = rejectionReason;
-    await rider.save();
+    
+    const savedRider = await rider.save();
+    console.log('Rider rejected successfully');
 
     res.status(200).json({
       success: true,
       message: "Rider verification rejected",
-      data: rider,
+      data: savedRider,
     });
   } catch (error) {
+    console.error('Reject verification error:', error);
     res.status(500).json({
       success: false,
       message: "Server error",
+      error: error.message,
     });
   }
 };

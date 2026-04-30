@@ -15,12 +15,21 @@ const withdrawalSchema = new mongoose.Schema(
     amount: {
       type: Number,
       required: true,
-      min: 100,
+      min: 60, // Updated minimum for instant payouts
       max: 10000,
+    },
+    payoutType: {
+      type: String,
+      enum: ["weekly", "instant"],
+      default: "instant",
+    },
+    fee: {
+      type: Number,
+      default: 0,
     },
     status: {
       type: String,
-      enum: ["pending", "approved", "rejected", "paid"],
+      enum: ["pending", "processing", "completed", "failed", "approved", "rejected", "paid"],
       default: "pending",
     },
     bankAccount: {
@@ -29,8 +38,26 @@ const withdrawalSchema = new mongoose.Schema(
       bankName: String,
       branchCode: String,
       iban: String,
+      routingNumber: String,
+      cardNumber: String,
     },
     paymentMethodId: {
+      type: String,
+      default: null,
+    },
+    stripeTransferId: {
+      type: String,
+      default: null,
+    },
+    retryCount: {
+      type: Number,
+      default: 0,
+    },
+    lastRetryAt: {
+      type: Date,
+      default: null,
+    },
+    failureReason: {
       type: String,
       default: null,
     },
@@ -72,6 +99,7 @@ const withdrawalSchema = new mongoose.Schema(
 withdrawalSchema.index({ rider: 1, status: 1, createdAt: -1 });
 withdrawalSchema.index({ userId: 1, status: 1, createdAt: -1 });
 withdrawalSchema.index({ status: 1, createdAt: -1 });
+withdrawalSchema.index({ payoutType: 1, status: 1, createdAt: -1 });
 withdrawalSchema.index({ createdAt: -1 });
 
 module.exports = mongoose.model("Withdrawal", withdrawalSchema);

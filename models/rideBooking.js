@@ -77,6 +77,7 @@ const rideBookingSchema = new mongoose.Schema(
       type: String,
       enum: [
         "pending",
+        "scheduled",
         "accepted",
         "onTheWay",
         "arrived", 
@@ -84,6 +85,7 @@ const rideBookingSchema = new mongoose.Schema(
         "completed",
         "cancelled",
         "rejected",
+        "no_driver_available",
       ],
       default: "pending",
     },
@@ -129,6 +131,60 @@ const rideBookingSchema = new mongoose.Schema(
     promoCode: { type: String, default: null },
     discountAmount: { type: Number, default: 0 },
     originalFare: { type: Number, default: null },
+    // Scheduled ride fields
+    scheduledDateTime: {
+      type: Date,
+      default: null,
+    },
+    isScheduled: {
+      type: Boolean,
+      default: false,
+    },
+    matchingStartedAt: {
+      type: Date,
+      default: null,
+    },
+    scheduledAt: {
+      type: Date,
+      default: null,
+    },
+    // Waypoints for multiple stops
+    waypoints: [
+      {
+        latitude: {
+          type: Number,
+          required: true,
+        },
+        longitude: {
+          type: Number,
+          required: true,
+        },
+        address: {
+          type: String,
+          required: true,
+        },
+        arrivalTime: {
+          type: Date,
+          default: null,
+        },
+        departureTime: {
+          type: Date,
+          default: null,
+        },
+        sequence: {
+          type: Number,
+          required: true,
+        },
+      },
+    ],
+    // Enhanced fare breakdown
+    fareBreakdown: {
+      baseFare: { type: Number, default: 0 },
+      distanceFare: { type: Number, default: 0 },
+      timeFare: { type: Number, default: 0 },
+      waypointFees: { type: Number, default: 0 },
+      totalFare: { type: Number, default: 0 },
+    },
     statusHistory: [
       {
         status: String,

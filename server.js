@@ -16,12 +16,16 @@ const cloudinary = require("cloudinary").v2;
 
 const http = require("http");
 const { initSocket } = require("./config/socket");
+const { startScheduledRideCron } = require("./services/scheduledRideCron");
 
 connectDB();
 const app = express();
 
 const server = http.createServer(app);
 const io = initSocket(server);
+
+// Start scheduled ride cron job
+startScheduledRideCron();
 
 app.use(express.json());
 app.use(
@@ -63,6 +67,9 @@ app.use("/api/stripe-connect", require("./routes/stripeConnectRoutes"));
 app.use("/api/payment", require("./routes/paymentRoutes"));
 app.use("/api/promo", require("./routes/promoRoutes"));
 app.use("/api/notifications", require("./routes/notificationRoutes")); // Notification routes
+app.use("/api/instant-payout", require("./routes/instantPayout")); // Instant payout routes
+app.use("/api/rides/enhanced", require("./routes/enhancedRideBooking")); // Enhanced ride booking routes
+app.use("/api/documents", require("./routes/documentVerification")); // Document verification routes
 
 app.get("/test", (req, res) => {
   res.json({ message: "Backend is alive!" });

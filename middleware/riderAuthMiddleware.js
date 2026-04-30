@@ -5,6 +5,8 @@ const Rider = require("../models/riderModel");
 const riderProtect = async (req, res, next) => {
   try {
     console.log("=== RIDER PROTECT MIDDLEWARE ===");
+    console.log("Request path:", req.path);
+    console.log("Request method:", req.method);
 
     let userId = req.user?._id || req.user?.id;
 
@@ -47,6 +49,7 @@ const riderProtect = async (req, res, next) => {
     console.log("Rider ID:", rider?._id);
     console.log("Rider status:", rider?.status);
     console.log("Rider isVerified:", rider?.isVerified);
+    console.log("Rider verificationStatus:", rider?.verificationStatus);
 
     if (!rider) {
       return res.status(404).json({
@@ -56,7 +59,12 @@ const riderProtect = async (req, res, next) => {
       });
     }
 
-    if (!rider.isVerified) {
+    // Allow Stripe Connect endpoints even if not verified
+    // Riders can set up their payment account while waiting for verification
+    const stripeConnectPaths = ['/create-account', '/account-link', '/account-status', '/refresh-link', '/dashboard-link'];
+    const isStripeConnectEndpoint = stripeConnectPaths.some(path => req.path.includes(path));
+
+    if (!rider.isVerified && !isStripeConnectEndpoint) {
       return res.status(403).json({
         success: false,
         message:
@@ -66,6 +74,7 @@ const riderProtect = async (req, res, next) => {
     }
 
     req.rider = rider;
+    console.log("✅ Rider middleware passed, proceeding to controller");
     next();
   } catch (error) {
     console.error("Rider protect error:", error);

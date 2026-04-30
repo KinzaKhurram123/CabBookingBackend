@@ -145,7 +145,20 @@ const riderSchema = new mongoose.Schema(
       accountNumber: { type: String, default: null },
       bankName: { type: String, default: null },
       branchCode: { type: String, default: null },
+      routingNumber: { type: String, default: null }, // 9 digits for instant payouts
+      cardNumber: { type: String, default: null }, // Encrypted, for instant transfers
       isVerified: { type: Boolean, default: false },
+    },
+
+    // Instant payout tracking
+    instantPayoutCount: {
+      type: Number,
+      default: 0,
+    },
+
+    lastInstantPayoutDate: {
+      type: Date,
+      default: null,
     },
 
     // Stripe Connect fields
