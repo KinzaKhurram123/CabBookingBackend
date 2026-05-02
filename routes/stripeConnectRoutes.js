@@ -47,6 +47,13 @@ router.post(
   stripeConnectController.disconnectAccount
 );
 
+router.post(
+  '/reset',
+  protect,
+  riderProtect,
+  stripeConnectController.resetConnectAccount
+);
+
 // OAuth callback routes (public - no authentication required)
 router.get('/return', stripeConnectController.handleConnectReturn);
 router.get('/refresh', stripeConnectController.handleConnectRefresh);

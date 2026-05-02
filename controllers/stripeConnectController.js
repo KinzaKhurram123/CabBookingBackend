@@ -2,7 +2,6 @@ const stripe = require('../config/stripe');
 const Rider = require('../models/riderModel');
 const User = require('../models/user');
 
-// Create Stripe Connect Express account for driver
 exports.createConnectAccount = async (req, res) => {
   try {
     console.log('Creating Stripe Connect account for rider:', req.rider._id);
@@ -93,7 +92,6 @@ exports.createConnectAccount = async (req, res) => {
   }
 };
 
-// Generate onboarding link for driver
 exports.createAccountLink = async (req, res) => {
   try {
     console.log('Creating account link for rider:', req.rider._id);
@@ -140,8 +138,6 @@ exports.createAccountLink = async (req, res) => {
     });
   }
 };
-
-// Get Connect account status
 exports.getAccountStatus = async (req, res) => {
   try {
     console.log('Getting account status for rider:', req.rider._id);
@@ -220,7 +216,6 @@ exports.getAccountStatus = async (req, res) => {
   }
 };
 
-// Refresh account link (when expired)
 exports.refreshAccountLink = async (req, res) => {
   try {
     console.log('Refreshing account link for rider:', req.rider._id);
@@ -261,7 +256,6 @@ exports.refreshAccountLink = async (req, res) => {
   }
 };
 
-// Handle OAuth return after onboarding
 exports.handleConnectReturn = async (req, res) => {
   try {
     res.send(`
@@ -339,7 +333,6 @@ exports.handleConnectReturn = async (req, res) => {
   }
 };
 
-// Handle OAuth refresh
 exports.handleConnectRefresh = async (req, res) => {
   try {
     res.send(`
@@ -447,7 +440,43 @@ exports.disconnectAccount = async (req, res) => {
   }
 };
 
-// Get Stripe Express Dashboard login link
+exports.resetConnectAccount = async (req, res) => {
+  try {
+    const riderId = req.rider._id;
+    const rider = await Rider.findById(riderId);
+
+    if (!rider) {
+      return res.status(404).json({
+        success: false,
+        message: 'Rider profile not found'
+      });
+    }
+
+    const oldAccountId = rider.stripeConnectAccountId;
+
+    rider.stripeConnectAccountId = null;
+    rider.connectAccountStatus = null;
+    rider.connectChargesEnabled = false;
+    rider.connectPayoutsEnabled = false;
+    rider.connectOnboardingComplete = false;
+    rider.connectDetailsSubmitted = false;
+    await rider.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Connect account reset successfully. You can now create a new account.',
+      clearedAccountId: oldAccountId
+    });
+  } catch (error) {
+    console.error('Reset connect account error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reset Connect account',
+      error: error.message
+    });
+  }
+};
+
 exports.getDashboardLink = async (req, res) => {
   try {
     const riderId = req.rider._id;
