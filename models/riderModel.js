@@ -233,6 +233,11 @@ const riderSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+
+    // Account deletion
+    isActive: { type: Boolean, default: true },
+    deletionRequestedAt: { type: Date, default: null },
+    scheduledDeletionAt: { type: Date, default: null },
   },
   {
     timestamps: true,

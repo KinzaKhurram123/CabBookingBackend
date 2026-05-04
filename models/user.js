@@ -116,6 +116,11 @@ const UserSchema = new mongoose.Schema(
     resetOTP: { type: Number },
     otpExpiry: { type: Date },
 
+    // Account deletion
+    isActive: { type: Boolean, default: true },
+    deletionRequestedAt: { type: Date, default: null },
+    scheduledDeletionAt: { type: Date, default: null },
+
     // Referral & Earn
     referralCode: {
       type: String,

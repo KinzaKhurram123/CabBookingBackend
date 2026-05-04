@@ -231,3 +231,168 @@ exports.getCurrentActiveBooking = async (req, res) => {
     });
   }
 };
+
+// ─────────────────────────────────────────────
+// REQUEST ACCOUNT DELETION (User)
+// Deactivates immediately, deletes after 3 days
+// DELETE /api/users/account
+// ─────────────────────────────────────────────
+exports.requestAccountDeletion = async (req, res) => {
+  try {
+    const User = require('../models/user');
+    const userId = req.user._id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (!user.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'Account deletion already requested',
+        scheduledDeletionAt: user.scheduledDeletionAt
+      });
+    }
+
+    const scheduledDeletionAt = new Date();
+    scheduledDeletionAt.setDate(scheduledDeletionAt.getDate() + 3); // 3 days from now
+
+    user.isActive = false;
+    user.deletionRequestedAt = new Date();
+    user.scheduledDeletionAt = scheduledDeletionAt;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Account deactivated. It will be permanently deleted after 3 days.',
+      deletionRequestedAt: user.deletionRequestedAt,
+      scheduledDeletionAt: user.scheduledDeletionAt
+    });
+  } catch (error) {
+    console.error('Request account deletion error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+  }
+};
+
+// ─────────────────────────────────────────────
+// CANCEL ACCOUNT DELETION (User) — restore account
+// POST /api/users/account/restore
+// ─────────────────────────────────────────────
+exports.cancelAccountDeletion = async (req, res) => {
+  try {
+    const User = require('../models/user');
+    const userId = req.user._id;
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    if (user.isActive) {
+      return res.status(400).json({ success: false, message: 'Account is already active' });
+    }
+
+    user.isActive = true;
+    user.deletionRequestedAt = null;
+    user.scheduledDeletionAt = null;
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Account deletion cancelled. Your account has been restored.'
+    });
+  } catch (error) {
+    console.error('Cancel account deletion error:', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+  }
+};
+
+// ─────────────────────────────────────────────
+// PUBLIC ACCOUNT DELETION (No token required)
+// For website public page / Google Play Store requirement
+// POST /api/users/delete-account-public
+// Body: { email, password, role }
+// role: "customer" (default) or "driver"
+// ─────────────────────────────────────────────
+exports.publicAccountDeletion = async (req, res) => {
+  try {
+    const User = require('../models/user');
+    const Rider = require('../models/riderModel');
+    const bcrypt = require('bcryptjs');
+
+    const { email, password, role } = req.body;
+
+    // Validate required fields
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email and password are required'
+      });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'No account found with this email address'
+      });
+    }
+
+    // Verify password
+    const isPasswordCorrect = await bcrypt.compare(password, user.password);
+    if (!isPasswordCorrect) {
+      return res.status(401).json({
+        success: false,
+        message: 'Incorrect password'
+      });
+    }
+
+    // Check if already requested
+    if (!user.isActive && user.scheduledDeletionAt) {
+      return res.status(400).json({
+        success: false,
+        message: 'Account deletion already requested',
+        scheduledDeletionAt: user.scheduledDeletionAt
+      });
+    }
+
+    const scheduledDeletionAt = new Date();
+    scheduledDeletionAt.setDate(scheduledDeletionAt.getDate() + 3);
+
+    // Deactivate user
+    user.isActive = false;
+    user.deletionRequestedAt = new Date();
+    user.scheduledDeletionAt = scheduledDeletionAt;
+    await user.save();
+
+    // If driver — also deactivate rider profile
+    if (user.role === 'driver') {
+      await Rider.findOneAndUpdate(
+        { user: user._id },
+        {
+          isActive: false,
+          status: 'offline',
+          deletionRequestedAt: user.deletionRequestedAt,
+          scheduledDeletionAt: user.scheduledDeletionAt
+        }
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      message: 'Your account has been deactivated and will be permanently deleted after 3 days.',
+      email: user.email,
+      deletionRequestedAt: user.deletionRequestedAt,
+      scheduledDeletionAt: user.scheduledDeletionAt
+    });
+  } catch (error) {
+    console.error('Public account deletion error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};

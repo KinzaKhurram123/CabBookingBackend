@@ -12,6 +12,8 @@ const {
   updateRiderStatus,
   addCompleteVehicleDetails,
   getRiderBookingHistory,
+  requestAccountDeletion,
+  cancelAccountDeletion,
   upload,
 } = require("../controllers/riderController");
 const {
@@ -67,6 +69,10 @@ router.put("/profile", updateRiderProfile);
 router.put("/status", riderProtect, updateRiderStatus);
 
 router.get("/booking-history", riderProtect, getRiderBookingHistory);
+
+// Account deletion
+router.delete("/account", riderProtect, requestAccountDeletion);       // request deletion (deactivates immediately, deletes after 3 days)
+router.post("/account/restore", riderProtect, cancelAccountDeletion);  // cancel deletion & restore account
 
 // Payment routes
 router.post("/payment/setup", setupPaymentMethod);

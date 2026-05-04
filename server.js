@@ -17,6 +17,7 @@ const cloudinary = require("cloudinary").v2;
 const http = require("http");
 const { initSocket } = require("./config/socket");
 const { startScheduledRideCron } = require("./services/scheduledRideCron");
+const { startAccountDeletionCron } = require("./services/accountDeletionCron");
 
 connectDB();
 const app = express();
@@ -26,6 +27,9 @@ const io = initSocket(server);
 
 // Start scheduled ride cron job
 startScheduledRideCron();
+
+// Start account deletion cron job (runs daily at 2 AM)
+startAccountDeletionCron();
 
 app.use(express.json());
 app.use(

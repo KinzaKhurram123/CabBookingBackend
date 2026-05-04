@@ -1148,3 +1148,96 @@ exports.getRiderBookingHistory = async (req, res) => {
     });
   }
 };
+
+// ─────────────────────────────────────────────
+// REQUEST ACCOUNT DELETION (Rider)
+// Deactivates immediately, deletes after 3 days
+// DELETE /api/rider/account
+// ─────────────────────────────────────────────
+exports.requestAccountDeletion = async (req, res) => {
+  try {
+    const Rider = require('../models/riderModel');
+    const User = require('../models/user');
+    const userId = req.user?._id || req.user?.id;
+
+    const rider = await Rider.findOne({ user: userId });
+    if (!rider) {
+      return res.status(404).json({ success: false, message: 'Rider profile not found' });
+    }
+
+    if (!rider.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'Account deletion already requested',
+        scheduledDeletionAt: rider.scheduledDeletionAt
+      });
+    }
+
+    const scheduledDeletionAt = new Date();
+    scheduledDeletionAt.setDate(scheduledDeletionAt.getDate() + 3); // 3 days from now
+
+    // Deactivate rider profile
+    rider.isActive = false;
+    rider.status = 'offline';
+    rider.deletionRequestedAt = new Date();
+    rider.scheduledDeletionAt = scheduledDeletionAt;
+    await rider.save();
+
+    // Also deactivate the linked user account
+    await User.findByIdAndUpdate(userId, {
+      isActive: false,
+      deletionRequestedAt: rider.deletionRequestedAt,
+      scheduledDeletionAt: rider.scheduledDeletionAt
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Account deactivated. It will be permanently deleted after 3 days.',
+      deletionRequestedAt: rider.deletionRequestedAt,
+      scheduledDeletionAt: rider.scheduledDeletionAt
+    });
+  } catch (error) {
+    console.error('Request account deletion error (rider):', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+  }
+};
+
+// ─────────────────────────────────────────────
+// CANCEL ACCOUNT DELETION (Rider) — restore account
+// POST /api/rider/account/restore
+// ─────────────────────────────────────────────
+exports.cancelAccountDeletion = async (req, res) => {
+  try {
+    const Rider = require('../models/riderModel');
+    const User = require('../models/user');
+    const userId = req.user?._id || req.user?.id;
+
+    const rider = await Rider.findOne({ user: userId });
+    if (!rider) {
+      return res.status(404).json({ success: false, message: 'Rider profile not found' });
+    }
+
+    if (rider.isActive) {
+      return res.status(400).json({ success: false, message: 'Account is already active' });
+    }
+
+    rider.isActive = true;
+    rider.deletionRequestedAt = null;
+    rider.scheduledDeletionAt = null;
+    await rider.save();
+
+    await User.findByIdAndUpdate(userId, {
+      isActive: true,
+      deletionRequestedAt: null,
+      scheduledDeletionAt: null
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Account deletion cancelled. Your account has been restored.'
+    });
+  } catch (error) {
+    console.error('Cancel account deletion error (rider):', error);
+    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+  }
+};
