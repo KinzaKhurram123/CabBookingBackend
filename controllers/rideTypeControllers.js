@@ -1,7 +1,5 @@
 const RideType = require("../models/rideType");
 
-// ─── USER: Get All Ride Types (Grouped) ──────────────────────────────────────
-
 exports.getRideTypes = async (req, res) => {
   try {
     const rideTypes = await RideType.find({ isActive: true }).sort({
@@ -13,7 +11,7 @@ exports.getRideTypes = async (req, res) => {
 
     rideTypes.forEach((ride) => {
       const category = ride.category;
-      
+
       if (!groupedRideTypes[category]) {
         groupedRideTypes[category] = {
           category: ride.categoryDisplayName || category,
@@ -137,10 +135,18 @@ exports.createRideType = async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!category || !categoryDisplayName || !rideId || !name || !price || !capacity) {
+    if (
+      !category ||
+      !categoryDisplayName ||
+      !rideId ||
+      !name ||
+      !price ||
+      !capacity
+    ) {
       return res.status(400).json({
         success: false,
-        message: "category, categoryDisplayName, rideId, name, price, and capacity are required",
+        message:
+          "category, categoryDisplayName, rideId, name, price, and capacity are required",
       });
     }
 
@@ -214,7 +220,7 @@ exports.updateRideType = async (req, res) => {
     const updatedRideType = await RideType.findByIdAndUpdate(
       req.params.id,
       req.body,
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     res.status(200).json({
