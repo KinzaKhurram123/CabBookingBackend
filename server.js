@@ -36,56 +36,46 @@ const allowedOrigins = [
   // Production
   "https://ridelynk.com",
   "https://www.ridelynk.com",
-  "https://admin.ridelynk.com",
-  "https://app.ridelynk.com",
-  "https://driver.ridelynk.com",
   "https://backend.ridelynk.com",
-  // Development
+
+  // Development (Permanent)
+  "https://dev.backend.ridelynk.com", // Use this instead of ngrok
   "http://localhost:3000",
   "http://localhost:3001",
-  "http://localhost:4000",
-  "http://localhost:5000",
-  "http://localhost:5173",  // Vite
-  "http://localhost:8080",  // Vue
   "http://127.0.0.1:3000",
-  "http://127.0.0.1:5173",
-  "http://127.0.0.1:5500",
-  "http://127.0.0.1:5501",
-  "http://localhost:5500",
-  "http://localhost:5501",
-  // ngrok (for testing)
-  "https://krystal-imaginable-hurtlingly.ngrok-free.dev",
 ];
 
 const corsOptions = {
-    origin: function (origin, callback) {
-      // Allow requests with no origin (mobile apps, Postman, curl)
-      if (!origin) return callback(null, true);
+  origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, Postman, curl)
+    if (!origin) return callback(null, true);
 
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true);
-      }
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
 
-      // Allow any ngrok subdomain for development
-      if (origin.match(/https:\/\/.*\.ngrok-free\.app$/) ||
-          origin.match(/https:\/\/.*\.ngrok\.io$/)) {
-        return callback(null, true);
-      }
+    // Allow any ridelynk.com subdomain
+    if (origin.match(/https:\/\/.*\.ridelynk\.com$/)) {
+      return callback(null, true);
+    }
 
-      // Allow any ridelynk.com subdomain
-      if (origin.match(/https:\/\/.*\.ridelynk\.com$/)) {
-        return callback(null, true);
-      }
-
-      console.warn(`CORS blocked origin: ${origin}`);
-      return callback(new Error(`CORS policy: Origin ${origin} not allowed`), false);
-    },
-    credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "stripe-signature"],
-    exposedHeaders: ["Authorization"],
-    optionsSuccessStatus: 200,
-    preflightContinue: false,
+    console.warn(`CORS blocked origin: ${origin}`);
+    return callback(
+      new Error(`CORS policy: Origin ${origin} not allowed`),
+      false,
+    );
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "stripe-signature",
+  ],
+  exposedHeaders: ["Authorization"],
+  optionsSuccessStatus: 200,
+  preflightContinue: false,
 };
 
 app.use(cors(corsOptions));
@@ -95,7 +85,7 @@ app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-app.use("/api/auth", require("./routes/authRoutes"));// authantication
+app.use("/api/auth", require("./routes/authRoutes")); // authantication
 
 app.use("/api/users", require("./routes/userRoutes"));
 app.use("/api/ride", require("./routes/rideBookingRoutes"));
@@ -175,11 +165,7 @@ cloudinary.config({
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-server.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-    console.log(`Server running on port ${PORT}`);
-    console.log(`✅ Stripe initialized`);
-  }
-);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on port ${PORT}`);
+  console.log(`✅ Stripe initialized`);
+});
