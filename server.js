@@ -40,6 +40,7 @@ const allowedOrigins = [
   "https://app.ridelynk.com",
   "https://driver.ridelynk.com",
   "https://backend.ridelynk.com",
+  "https://ridelynk.vercel.app",
   // Development
   "http://localhost:3000",
   "http://localhost:3001",
