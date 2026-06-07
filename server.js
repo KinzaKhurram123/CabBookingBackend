@@ -31,31 +31,39 @@ startScheduledRideCron();
 // Start account deletion cron job (runs daily at 2 AM)
 startAccountDeletionCron();
 
-// ─── CORS Configuration ───────────────────────────────────────────────────────
 const allowedOrigins = [
-  // Production
   "https://ridelynk.com",
   "https://www.ridelynk.com",
   "https://backend.ridelynk.com",
 
-  // Development (Permanent)
-  "https://dev.backend.ridelynk.com", // Use this instead of ngrok
   "http://localhost:3000",
   "http://localhost:3001",
+  "http://localhost:5500",
+  "http://localhost:5504",
   "http://127.0.0.1:3000",
+  "http://127.0.0.1:5500",
+  "http://127.0.0.1:5504", // ← یہ ضروری ہے آپ کے لیے
+
+  "https://dev.backend.ridelynk.com",
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, Postman, curl)
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    // Allow any ridelynk.com subdomain
     if (origin.match(/https:\/\/.*\.ridelynk\.com$/)) {
+      return callback(null, true);
+    }
+
+    if (
+      origin.match(/https:\/\/.*\.ngrok-free\.app$/) ||
+      origin.match(/https:\/\/.*\.ngrok\.io$/) ||
+      origin.match(/https:\/\/.*\.ngrok-free\.dev$/)
+    ) {
       return callback(null, true);
     }
 
@@ -72,6 +80,7 @@ const corsOptions = {
     "Authorization",
     "X-Requested-With",
     "stripe-signature",
+    "ngrok-skip-browser-warning", // ← یہ add کریں
   ],
   exposedHeaders: ["Authorization"],
   optionsSuccessStatus: 200,
